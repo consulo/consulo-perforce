@@ -1,0 +1,2058 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+package org.jetbrains.idea.perforce.perforce;
+
+import com.google.common.collect.Lists;
+import consulo.annotation.component.ComponentScope;
+import consulo.annotation.component.ServiceAPI;
+import consulo.annotation.component.ServiceImpl;
+import consulo.container.boot.ContainerPathManager;
+import jakarta.inject.Inject;
+import jakarta.inject.Singleton;
+import consulo.logging.Logger;
+import consulo.application.progress.ProgressIndicator;
+import consulo.application.progress.ProgressManager;
+import consulo.project.Project;
+import consulo.util.lang.Pair;
+import consulo.util.lang.ref.Ref;
+import consulo.platform.Platform;
+import consulo.util.io.FileUtil;
+import consulo.application.util.LineTokenizer;
+import consulo.util.lang.StringUtil;
+import consulo.versionControlSystem.FilePath;
+import consulo.versionControlSystem.VcsConfiguration;
+import consulo.versionControlSystem.VcsException;
+import consulo.versionControlSystem.change.ChangeListManager;
+import consulo.versionControlSystem.change.LocalChangeList;
+import consulo.versionControlSystem.history.VcsRevisionNumber;
+import consulo.versionControlSystem.change.ContentRevisionCache;
+import consulo.versionControlSystem.versionBrowser.ChangeBrowserSettings;
+import consulo.virtualFileSystem.StandardFileSystems;
+import consulo.virtualFileSystem.util.VirtualFileUtil;
+import consulo.virtualFileSystem.VirtualFile;
+import consulo.util.collection.ArrayUtil;
+import consulo.util.collection.HashingStrategy;
+import consulo.util.collection.Maps;
+import consulo.util.lang.SystemProperties;
+import consulo.util.collection.JBIterable;
+import consulo.util.collection.MultiMap;
+import consulo.versionControlSystem.util.VcsUtil;
+import org.jspecify.annotations.Nullable;
+import org.jetbrains.idea.perforce.ChangeListData;
+import org.jetbrains.idea.perforce.ClientVersion;
+import consulo.perforce.localize.PerforceLocalize;
+import org.jetbrains.idea.perforce.ServerVersion;
+import org.jetbrains.idea.perforce.application.ConnectionKey;
+import org.jetbrains.idea.perforce.application.FileGrouper;
+import org.jetbrains.idea.perforce.application.LocalPathsSet;
+import org.jetbrains.idea.perforce.application.PerforceClient;
+import org.jetbrains.idea.perforce.application.PerforceManager;
+import org.jetbrains.idea.perforce.application.PerforceNumberNameSynchronizer;
+import org.jetbrains.idea.perforce.application.PerforceShelf;
+import org.jetbrains.idea.perforce.application.PerforceVcs;
+import org.jetbrains.idea.perforce.application.PerforceVcsRevisionNumber;
+import org.jetbrains.idea.perforce.application.ShelvedChange;
+import org.jetbrains.idea.perforce.application.annotation.AnnotationInfo;
+import org.jetbrains.idea.perforce.changesBrowser.FileChange;
+import org.jetbrains.idea.perforce.merge.BaseRevision;
+import org.jetbrains.idea.perforce.perforce.connections.P4Connection;
+import org.jetbrains.idea.perforce.perforce.connections.PerforceConnectionManager;
+import org.jetbrains.idea.perforce.perforce.connections.PerforceConnectionManagerI;
+import org.jetbrains.idea.perforce.perforce.connections.PerforceLocalConnection;
+import org.jetbrains.idea.perforce.perforce.jobs.JobsSearchSpecificator;
+import org.jetbrains.idea.perforce.perforce.jobs.PerforceJob;
+import org.jetbrains.idea.perforce.perforce.login.LoginSupport;
+import org.jetbrains.idea.perforce.perforce.login.PerforceLoginManager;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.sql.Time;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+@Singleton
+@ServiceAPI(ComponentScope.PROJECT)
+@ServiceImpl
+public final class PerforceRunner implements PerforceRunnerI {
+    private final Project myProject;
+    private final PerforceConnectionManagerI myConnectionManager;
+    private final PerforceSettings mySettings;
+    private final PerforceRunnerProxy myProxy;
+
+    private static final int MAX_LOG_LENGTH = 10*1000*1000;
+    private static final int OPENED_SIZE = 50;
+
+    static final String PASSWORD_INVALID_MESSAGE = "Perforce password (P4PASSWD) invalid or unset";
+    public static final String PASSWORD_INVALID_MESSAGE2 = "Password invalid.";
+    public static final String AUTHENTICATION_FAILED_MESSAGE = "Authentication failed";
+    private static final String SESSION_EXPIRED_MESSAGE = "Your session has expired";
+    public static final String PASSWORD_EXPIRED = "Your password has expired";
+    public static final String FILES_UP_TO_DATE = "file(s) up-to-date.";
+    private static final String PASSWORD_NOT_ALLOWED_MESSAGE = "Password not allowed at this server security level";
+    public static final String NO_SUCH_FILE_MESSAGE = " - no such file(s)";
+    private static final String STANDARD_REVERT_UNCHANGED_ERROR_MESSAGE = "file(s) not opened on this client";
+    private static final String YET_ANOTHER_STANDARD_REVERT_UNCHANGED_ERROR_MESSAGE = "file(s) not opened for edit.";
+    private static final String NO_FILES_TO_RESOLVE_MESSAGE = "no file(s) to resolve";
+    private static final String UBINARY_MERGING_MESSAGE = "- ubinary/ubinary merge ";
+    private static final String BINARY_MERGING_MESSAGE = "- binary/binary merge ";
+    private static final String MERGING_MESSAGE = "- merging ";
+    private static final String USING_BASE_MESSAGE = "using base";
+    public static final String NOT_UNDER_CLIENT_ROOT_MESSAGE = "is not under client's root";
+    public static final String NOT_IN_CLIENT_VIEW_MESSAGE = " - file(s) not in client view";
+    public static final String NOT_ON_CLIENT_MESSAGE = "file(s) not on client";
+    public static final String NOT_OPENED_ON_CLIENT_MESSAGE = "file(s) not opened on this client";
+    private static final String NO_FILES_RESOLVED_MESSAGE = "no file(s) resolved";
+    private static final String INVALID_REVISION_NUMBER = "Invalid revision number";
+
+    public static final String CHANGE = "Change:";
+    public static final String DATE = "Date:";
+    public static final String CLIENT = "Client:";
+    public static final String USER = "User:";
+    public static final String STATUS = "Status:";
+    public static final String DESCRIPTION = "Description:";
+    public static final String JOB = "Job:";
+    public static final String JOBS = "Jobs:";
+    public static final String FILES = "Files:";
+    public static final String OWNER = "Owner:";
+    public static final String VIEW = "View:";
+    public static final String TYPE = "Type:";
+
+    public static final String CLIENTSPEC_ROOT = "Root:";
+    public static final String CLIENTSPEC_ALTROOTS = "AltRoots:";
+
+    public static final String USER_NAME = "User name:";
+    public static final String CLIENT_NAME = "Client name:";
+    public static final String CLIENT_HOST = "Client host:";
+    public static final String CLIENT_ROOT = "Client root:";
+    public static final String CLIENT_UNKNOWN = "Client unknown.";
+    public static final String CURRENT_DIRECTORY = "Current directory:";
+    public static final String CLIENT_ADDRESS = "Client address:";
+    public static final String PEER_ADDRESS = "Client address:";
+    public static final String CLIENT_OPTIONS = "Options:";
+    public static final String SERVER_ADDRESS = "Server address:";
+    public static final String SERVER_ROOT = "Server root:";
+    public static final String SERVER_DATE = "Server date:";
+    public static final String SERVER_LICENSE = "Server license:";
+    public static final String SERVER_VERSION = "Server version:";
+
+    private static final DateTimeFormatter DATE_SPEC_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy/MM/dd:HH:mm:ss", Locale.US).withZone(ZoneId.systemDefault());
+    private static final String NOW = "now";
+    private static final String DEFAULT_CHANGELIST_NUMBER = "default";
+
+    public static final String CLIENT_FILE_PREFIX = "... clientFile ";
+
+    private static final int CHUNK_SIZE = SystemProperties.getIntProperty("p4.chunk.size", 2000);
+
+    public static final String[] CHANGE_FORM_FIELDS = new String[]{CHANGE,
+        DATE,
+        CLIENT,
+        USER,
+        STATUS,
+        TYPE,
+        DESCRIPTION,
+        JOBS,
+        FILES};
+
+    private static final String[] AVAILABLE_INFO = new String[]{USER_NAME,
+        CLIENT_NAME,
+        CLIENT_HOST,
+        CLIENT_ROOT,
+        CLIENT_UNKNOWN,
+        CURRENT_DIRECTORY,
+        CLIENT_ADDRESS,
+        SERVER_ADDRESS,
+        PEER_ADDRESS,
+        SERVER_ROOT,
+        SERVER_DATE,
+        SERVER_LICENSE,
+        SERVER_VERSION};
+
+    private static final Logger LOG = Logger.getInstance(PerforceRunner.class);
+    private static final Logger SPECIFICATION_LOG = Logger.getInstance("#PerforceJobSpecificationLogging");
+    private static final String DEFAULT_DESCRIPTION = "<none>";
+    private static final String DUMP_FILE_NAME = "p4output.log";
+
+    private static final String CLIENT_VERSION_REV = "Rev.";
+
+    private final PerforceManager myPerforceManager;
+    private final LoginSupport myLoginManager;
+
+    public static PerforceRunner getInstance(Project project) {
+        return project.getInstance(PerforceRunner.class);
+    }
+
+    @Inject
+    public PerforceRunner(Project project) {
+        this(PerforceConnectionManager.getInstance(project),
+                  PerforceSettings.getSettings(project),
+                  PerforceLoginManager.getInstance(project));
+    }
+
+    public PerforceRunner(PerforceConnectionManagerI connectionManager, PerforceSettings settings, LoginSupport loginManager) {
+        myProject = settings.getProject();
+        myConnectionManager = connectionManager;
+        mySettings = settings;
+        myPerforceManager = PerforceManager.getInstance(myProject);
+        myLoginManager = loginManager;
+        myProxy = new PerforceRunnerProxy(myProject, this);
+    }
+
+    public PerforceRunnerI getProxy() {
+        return myProxy.getProxy();
+    }
+
+    public Map<String, List<String>> getInfo(P4Connection connection) throws VcsException {
+        String[] p4args = {"info"};
+        ExecResult execResult = executeP4Command(p4args, connection);
+        checkError(execResult, connection);
+        return FormParser.execute(execResult.getStdout(), AVAILABLE_INFO, CLIENT_UNKNOWN);
+    }
+
+    public @Nullable String getClient(@Nullable P4Connection connection) throws VcsException {
+        if (connection == null) {
+            return null;
+        }
+        List<String> clientNames = getInfo(connection).get(CLIENT_NAME);
+        return clientNames == null ? null : clientNames.get(0);
+    }
+
+
+    @Override
+    public void edit(P4File file) throws VcsException {
+        P4Connection connection = myConnectionManager.getConnectionForFile(file);
+        edit(file, getActiveListNumber(connection));
+    }
+
+    public void edit(P4File file, long changeListNumber) throws VcsException {
+        edit(file, changeListNumber, false);
+    }
+
+    public void edit(P4File file, long changeListNumber, boolean keepWorkspace) throws VcsException {
+        P4Connection connection = getNotNullConnection(file);
+        editAll(List.of(file), changeListNumber, keepWorkspace, connection);
+    }
+
+    public void editAll(List<P4File> files, long changeListNumber, boolean keepWorkspace, P4Connection connection) throws VcsException {
+        List<String> paths = new ArrayList<>();
+        for (P4File file : files) {
+            file.invalidateFstat();
+            paths.add(file.getEscapedPath());
+        }
+
+        CommandArguments arguments = CommandArguments.createOn(P4Command.edit);
+        if (keepWorkspace) {
+            arguments.append("-k");
+        }
+        appendChangeListNumber(changeListNumber, arguments);
+
+        ExecResult execResult = executeP4Command(arguments.getArguments(), paths, null, new PerforceContext(connection));
+        checkError(execResult, connection);
+    }
+
+    private P4Connection getNotNullConnection(P4File file) throws VcsException {
+        P4Connection connection = myConnectionManager.getConnectionForFile(file);
+        if (connection == null) {
+            throw new VcsException(PerforceLocalize.errorNoConnectionForFile(file.getLocalPath()).get());
+        }
+        return connection;
+    }
+
+    private static void appendChangeListNumber(long changeListNumber, CommandArguments arguments) {
+        if (changeListNumber > 0) {
+            arguments.append("-c").append(String.valueOf(changeListNumber));
+        }
+    }
+
+    public Map<P4File, FStat> fstatBulk(List<P4File> files) throws VcsException {
+        if (files.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        P4Connection connection = getNotNullConnection(files.get(0));
+        Set<String> p4Args = new LinkedHashSet<>();
+        for (P4File file : files) {
+            p4Args.add(file.getEscapedPath());
+        }
+        ExecResult execResult = executeP4Command(new String[]{"fstat"}, p4Args, null, new PerforceContext(connection));
+
+        Map<P4File, FStat> result = new LinkedHashMap<>();
+        String stderr = execResult.getStderr();
+
+        Map<String, P4File> path2File = Maps.newHashMap(FileUtil.PATH_HASHING_STRATEGY);
+        for (P4File file : files) {
+            path2File.put(FileUtil.toSystemIndependentName(file.getLocalPath()), file);
+        }
+
+        for (String line : StringUtil.splitByLines(stderr)) {
+            int index = line.indexOf(NO_SUCH_FILE_MESSAGE);
+            if (index < 0) {
+                index = line.indexOf(NOT_IN_CLIENT_VIEW_MESSAGE);
+            }
+            if (index >= 0) {
+                FStat fStat = new FStat();
+                fStat.status = line.contains(NO_SUCH_FILE_MESSAGE) ? FStat.Status.NOT_ADDED : FStat.Status.NOT_IN_CLIENTSPEC;
+                result.put(getP4FileByPath(line.substring(0, index), path2File), fStat);
+            }
+            else {
+                checkError(execResult, connection);
+            }
+        }
+
+        try {
+            execResult.allowSafeStdoutUsage(stream -> {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8));
+                while (true) {
+                    try {
+                        FStat fStat = FStat.parseFStat(reader);
+                        if (fStat == null) {
+                            break;
+                        }
+
+                        result.put(getP4FileByPath(fStat.clientFile, path2File), fStat);
+                    }
+                    catch (VcsException e) {
+                        throw new IOException(e);
+                    }
+                }
+            });
+        }
+        catch (IOException e) {
+            if (e.getCause() instanceof VcsException) {
+                throw (VcsException)e.getCause();
+            }
+            throw new VcsException(e);
+        }
+        return result;
+    }
+
+    private static P4File getP4FileByPath(String path, Map<String, P4File> path2File) throws VcsException {
+        String clientFile = P4File.unescapeWildcards(FileUtil.toSystemIndependentName(path));
+        P4File p4File = path2File.get(clientFile);
+        if (p4File == null) {
+            throw new VcsException(PerforceLocalize.errorInvalidFileFstatMapping(clientFile, new ArrayList<>(path2File.keySet())).get());
+        }
+        return p4File;
+    }
+
+    @Override
+    public FStat fstat(P4File p4File) throws VcsException {
+        Map<P4File, FStat> map = fstatBulk(Collections.singletonList(p4File));
+        FStat result = map.get(p4File);
+        if (result == null) {
+            throw new VcsException(PerforceLocalize.errorNoFstatForFile(p4File, map).get());
+        }
+        return result;
+    }
+
+    public void revertAll(List<String> files, P4Connection connection) throws VcsException {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.revert);
+        checkError(executeP4Command(arguments.getArguments(), files, null, new PerforceContext(connection)), connection);
+    }
+
+    @Override
+    public void revert(P4File p4File, boolean justTry) throws VcsException {
+        p4File.invalidateFstat();
+        CommandArguments arguments = CommandArguments.createOn(P4Command.revert).append(p4File.getEscapedPath());
+        P4Connection connection = getNotNullConnection(p4File);
+        ExecResult execResult = executeP4Command(arguments.getArguments(), connection);
+        if (!justTry) {
+            checkError(execResult, connection);
+        }
+    }
+
+    public void revertUnchanged(P4Connection connection, Collection<String> files) throws VcsException {
+        ExecResult execResult = executeP4Command(new String[]{"revert", "-a"}, files, null, new PerforceContext(connection));
+        if (!execResult.getStderr().contains(STANDARD_REVERT_UNCHANGED_ERROR_MESSAGE) &&
+                !execResult.getStderr().contains(YET_ANOTHER_STANDARD_REVERT_UNCHANGED_ERROR_MESSAGE)) {
+            checkError(execResult, connection);
+        }
+    }
+
+    public void revertUnchanged(P4Connection connection, long changeListNumber) throws VcsException {
+        String changeListNum = changeListNumber == -1L ? DEFAULT_CHANGELIST_NUMBER : String.valueOf(changeListNumber);
+        ExecResult execResult = executeP4Command(new String[]{"revert", "-a", "-c", changeListNum}, connection);
+        if (!execResult.getStderr().contains(STANDARD_REVERT_UNCHANGED_ERROR_MESSAGE) &&
+                !execResult.getStderr().contains(YET_ANOTHER_STANDARD_REVERT_UNCHANGED_ERROR_MESSAGE)) {
+            checkError(execResult, connection);
+        }
+    }
+
+    private long getActiveListNumber(@Nullable P4Connection connection) throws VcsException {
+        if (connection == null) {
+            return -1;
+        }
+        PerforceManager.ensureValidClient(myProject, connection);
+        LocalChangeList activeList = ChangeListManager.getInstance(myProject).getDefaultChangeList();
+        ConnectionKey connectionKey = connection.getConnectionKey();
+        Long number = PerforceNumberNameSynchronizer.getInstance(myProject).getNumber(connectionKey, activeList.getName());
+        return number == null ? -1 : number;
+    }
+
+    public void add(P4File p4File) throws VcsException {
+        P4Connection connection = myConnectionManager.getConnectionForFile(p4File);
+        add(p4File, getActiveListNumber(connection));
+    }
+
+    public void add(P4File p4File, long changeListNumber) throws VcsException {
+        p4File.invalidateFstat();
+        CommandArguments arguments = CommandArguments.createOn(P4Command.add);
+        if (PerforceVcs.getFileNameComplaint(p4File) != null) {
+            arguments.append("-f");
+        }
+        P4Connection connection = getNotNullConnection(p4File);
+        appendChangeListNumber(changeListNumber, arguments);
+        arguments.append(p4File.getLocalPath());
+        ExecResult execResult = executeP4Command(arguments.getArguments(), connection);
+        checkError(execResult, connection);
+    }
+
+    public ExecResult previewAdd(P4Connection connection, Collection<VirtualFile> files) {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.add).append("-f").append("-n");
+
+        List<String> paths = new ArrayList<>();
+        for (VirtualFile file : files) {
+            paths.add(VirtualFileUtil.virtualToIoFile(file).getPath());
+        }
+
+        return executeP4Command(arguments.getArguments(), paths, null, new PerforceContext(connection));
+    }
+
+    public ExecResult ignores(P4Connection connection, Collection<VirtualFile> files) {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.ignores).append("-i");
+
+        File cwd = connection.getWorkingDirectory();
+        for (VirtualFile file : files) {
+            String relativePath = FileUtil.getRelativePath(cwd, VirtualFileUtil.virtualToIoFile(file));
+            if (relativePath != null) {
+                arguments.append(relativePath);
+            }
+        }
+
+        return executeP4Command(arguments.getArguments(), connection);
+    }
+
+    public ExecResult ignores(P4Connection connection) {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.ignores);
+        return executeP4Command(arguments.getArguments(), connection);
+    }
+
+    @Override
+    public ExecResult sync(P4File p4File, boolean forceSync) throws VcsException {
+        return doSync(p4File, forceSync ? "-f" : null);
+    }
+
+    public ExecResult previewSync(P4File p4File) throws VcsException {
+        return doSync(p4File, "-n");
+    }
+
+    private ExecResult doSync(P4File p4File, @Nullable String arg) throws VcsException {
+        p4File.invalidateFstat();
+        P4Connection connection = getNotNullConnection(p4File);
+        CommandArguments arguments = CommandArguments.createOn(P4Command.sync);
+        if (arg != null) {
+            arguments.append(arg);
+        }
+        arguments.append(p4File.getRecursivePath());
+
+        return executeP4Command(arguments.getArguments(), Collections.emptyList(), null, new PerforceContext(connection, true, false));
+    }
+
+    public ExecResult sync(P4File p4File, String revision) throws VcsException {
+        p4File.invalidateFstat();
+        P4Connection connection = getNotNullConnection(p4File);
+        CommandArguments arguments = CommandArguments.createOn(P4Command.sync).append(p4File.getRecursivePath() + "@" + revision);
+        return executeP4Command(arguments.getArguments(), Collections.emptyList(), null, new PerforceContext(connection, true, false));
+    }
+
+    // todo ? not sure for move+add/delete cases
+    public void assureDel(P4File p4File, @Nullable Long changeList) throws VcsException {
+        // reverting the edit of a file at the old path in a renamed directory will recreate both the file
+        // and its parent dir => need to delete both
+        List<File> filesToDelete = new ArrayList<>();
+        File f = p4File.getLocalFile();
+        while (f != null && !f.exists()) {
+            filesToDelete.add(f);
+            f = f.getParentFile();
+        }
+
+        // can't use cached fstat because we can just have performed some operation affecting the status of the file
+        FStat fstat = p4File.getFstat(myProject, true);
+
+        if (fstat.status == FStat.STATUS_NOT_ADDED || fstat.status == FStat.STATUS_NOT_IN_CLIENTSPEC || fstat.local == FStat.LOCAL_DELETING ||
+                fstat.local == FStat.LOCAL_MOVE_DELETING) {
+            // this is OK, that's what we want
+        }
+        else {
+            // we have to do something about it
+
+            // first, if revert is enough
+            if (fstat.local == FStat.LOCAL_ADDING || fstat.local == FStat.LOCAL_MOVE_ADDING) {
+                revert(p4File, false);
+            }
+            else if (fstat.local == FStat.LOCAL_CHECKED_IN) {
+                if (changeList == null) {
+                    delete(p4File);
+                }
+                else {
+                    delete(p4File, changeList.longValue());
+                }
+            }
+            else {
+                revert(p4File, false);
+                try {
+                    if (changeList == null) {
+                        delete(p4File);
+                    }
+                    else {
+                        delete(p4File, changeList.longValue());
+                    }
+                }
+                catch (Exception ex) {
+                    // TODO: now we ignore, but we should really check the status after revert
+                }
+            }
+        }
+
+        // remove file
+        for (File file : filesToDelete) {
+            if (file.exists()) {
+                boolean res = file.delete();
+                if (!res) {
+                    throw new VcsException(PerforceLocalize.exceptionTextCannotDeleteLocalFile(file).get());
+                }
+            }
+        }
+    }
+
+    private void delete(P4File p4File) throws VcsException {
+        P4Connection connection = myConnectionManager.getConnectionForFile(p4File);
+        delete(p4File, getActiveListNumber(connection));
+    }
+
+    private void delete(P4File p4File, long changeListNumber) throws VcsException {
+        p4File.invalidateFstat();
+        CommandArguments arguments = CommandArguments.createOn(P4Command.delete);
+        P4Connection connection = getNotNullConnection(p4File);
+        appendChangeListNumber(changeListNumber, arguments);
+        arguments.append(p4File.getEscapedPath());
+        ExecResult execResult = executeP4Command(arguments.getArguments(), connection);
+        checkError(execResult, connection);
+    }
+
+    public void integrate(P4File oldP4File,P4File newP4File) throws VcsException {
+        P4Connection connection = myConnectionManager.getConnectionForFile(oldP4File);
+        integrate(oldP4File, newP4File, getActiveListNumber(connection));
+    }
+
+    public void integrate(P4File oldP4File, P4File newP4File, long changeListNumber) throws VcsException {
+        P4Connection connection = getNotNullConnection(oldP4File);
+        oldP4File.invalidateFstat();
+        newP4File.invalidateFstat();
+        CommandArguments arguments = CommandArguments.createOn(P4Command.integrate);
+        appendChangeListNumber(changeListNumber, arguments);
+        arguments.append("-d");
+        arguments.append(oldP4File.getEscapedPath()).append(newP4File.getEscapedPath());
+
+        ExecResult execResult = executeP4Command(arguments.getArguments(), connection);
+        checkError(execResult, connection);
+    }
+
+    public void reopen(File[] selectedFiles, long changeListNumber) throws VcsException {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.reopen);
+        arguments.append("-c");
+        if (changeListNumber > 0) {
+            arguments.append(String.valueOf(changeListNumber));
+        }
+        else {
+            arguments.append("default");
+        }
+
+        MultiMap<P4Connection, File> connectionToFile = FileGrouper.distributeIoFilesByConnection(Arrays.asList(selectedFiles),
+                                                                                                                                                                                              mySettings.getProject());
+
+        executeFileCommands(arguments, connectionToFile);
+    }
+
+    private void executeFileCommands(CommandArguments arguments,
+                                                                      MultiMap<P4Connection, File> connectionToFile) throws VcsException {
+        for (P4Connection connection : connectionToFile.keySet()) {
+            CommandArguments connectionArguments = arguments.createCopy();
+            for (File selectedFile : connectionToFile.get(connection)) {
+                connectionArguments.append(P4File.escapeWildcards(selectedFile.getPath()));
+            }
+            ExecResult execResult = executeP4Command(connectionArguments.getArguments(), connection);
+            checkError(execResult, connection);
+        }
+    }
+
+    public void reopen(P4Connection connection, long targetChangeListNumber, List<String> paths) throws VcsException {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.reopen);
+        arguments.append("-c");
+        if (targetChangeListNumber > 0) {
+            arguments.append(String.valueOf(targetChangeListNumber));
+        }
+        else {
+            arguments.append("default");
+        }
+
+        checkError(executeP4Command(arguments.getArguments(), paths, null, new PerforceContext(connection)), connection);
+    }
+
+    public List<String> getClients(P4Connection connection) throws VcsException {
+        ExecResult execResult = executeP4Command(new String[]{P4Command.clients.getName()}, connection);
+        checkError(execResult, connection);
+        return OutputMessageParser.processClientsOutput(execResult.getStdout());
+    }
+
+    public List<String> getUsers(P4Connection connection) throws VcsException {
+        ExecResult execResult = executeP4Command(new String[]{P4Command.users.getName()}, connection);
+        checkError(execResult, connection);
+        return OutputMessageParser.processUsersOutput(execResult.getStdout());
+    }
+
+    public List<PerforceChange> getChanges(P4Connection connection, long changeListNumber) throws VcsException {
+        PerforceClient client = myPerforceManager.getClient(connection);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("connection = " + connection + ", changeListNumber = " + changeListNumber);
+        }
+
+        if (changeListNumber != -1) {
+            Pair<ChangeListData, List<FileChange>> pair = describeAll(connection, Collections.singletonList(changeListNumber), false).values().iterator().next();
+            return createPerforceChanges(client, pair.first, pair.second);
+        }
+
+        List<PerforceChange> result = new ArrayList<>();
+        // 'p4 describe' doesn't work for the default changelist
+        Map<String, List<String>> form = getChangeSpec(connection, changeListNumber);
+        List<String> strings = form.get(FILES);
+        if (strings != null) {
+            for (String s : strings) {
+                PerforceChange element = PerforceChange.createOn(s, client, changeListNumber, getDescription(form));
+                if (element != null) {
+                    result.add(element);
+                }
+            }
+        }
+        return result;
+    }
+
+    private Map<Long, Pair<ChangeListData, List<FileChange>>> describeAll(P4Connection connection, List<Long> lists, boolean shelved) throws VcsException {
+        CommandArguments args = CommandArguments.createOn(P4Command.describe);
+        args.append("-s");
+
+        if (shelved) {
+            args.append("-S");
+        }
+
+        for (Long list : lists) {
+            args.append(list);
+        }
+        ExecResult execResult = executeP4Command(args.getArguments(), connection);
+        checkError(execResult, connection);
+
+        ProgressManager.checkCanceled();
+
+        String stdout = execResult.getStdout();
+        Map<ChangeListData, List<FileChange>> map = OutputMessageParser.processMultiDescriptionOutput(stdout, shelved);
+        Map<Long, Pair<ChangeListData, List<FileChange>>> result = new HashMap<>();
+        for (ChangeListData data : map.keySet()) {
+            result.put(data.NUMBER, Pair.create(data, map.get(data)));
+        }
+        return result;
+    }
+
+    private static List<PerforceChange> createPerforceChanges(PerforceClient client,
+                                                                                                                                          ChangeListData data,
+                                                                                                                                          List<FileChange> changes)
+        throws VcsException {
+        List<PerforceChange> converted = new ArrayList<>();
+        for (FileChange fileChange : changes) {
+            ProgressManager.checkCanceled();
+            File localFile = PerforceManager.getFileByDepotName(fileChange.getDepotPath(), client);
+            converted.add(new PerforceChange(fileChange.getType(), localFile, fileChange.getDepotPath(),
+                                                                              fileChange.getRevisionAfter(), data.NUMBER, data.DESCRIPTION));
+        }
+        return converted;
+    }
+
+    private Map<String, List<String>> getChangeSpec(P4Connection connection, long changeListNumber) throws VcsException {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.change);
+        arguments.append("-o");
+        if (changeListNumber > 0) {
+            arguments.append(String.valueOf(changeListNumber));
+        }
+        ExecResult execResult = executeP4Command(arguments.getArguments(), connection);
+        checkError(execResult, connection);
+
+        String stdout = execResult.getStdout();
+        return FormParser.execute(stdout, CHANGE_FORM_FIELDS);
+    }
+
+    public List<PerforceChangeList> getPendingChangeLists(P4Connection connection) throws VcsException {
+        PerforceClient client = myPerforceManager.getClient(connection);
+        CommandArguments args = CommandArguments.createOn(P4Command.changes);
+        args.append("-i");
+        appendTArg(args, connection);
+        args.append("-l")
+            .append("-s").append("pending");
+
+        appendUserName(client, args);
+        appendClientName(client, args);
+        ExecResult execResult = executeP4Command(args.getArguments(), connection);
+        checkError(execResult, connection);
+        return parsePerforceChangeLists(execResult.getStdout(), connection, new PerforceChangeCache(myProject));
+    }
+
+    public void setChangeRevisions(P4Command command, P4Connection connection, List<PerforceChange> result)
+        throws VcsException {
+        Map<String, Long> revisions = Platform.current().fs().isCaseSensitive()
+                                                                    ? new HashMap<>()
+                                                                    : Maps.newHashMap(HashingStrategy.caseInsensitive());
+
+        P4Parser parser = null;
+        if (command == P4Command.have) {
+            parser = new P4HaveParser(myPerforceManager, revisions);
+        }
+        else if (command == P4Command.opened) {
+            parser = new P4OpenedParser(revisions);
+        }
+
+        if (parser == null) {
+            return;
+        }
+
+        List<FilePath> files = new ArrayList<>();
+        for (PerforceChange perforceChange : result) {
+            File file = perforceChange.getFile();
+            if (file != null) {
+                files.add(VcsUtil.getFilePath(file, false));
+            }
+        }
+
+        PathsHelper pathsHelper = new PathsHelper(myPerforceManager);
+        pathsHelper.addAllPaths(files);
+
+        executeMultiple(pathsHelper, connection, parser);
+
+        for (PerforceChange change : result) {
+            File file = change.getFile();
+            if (file == null) {
+                continue;
+            }
+
+            String revisionKey = null;
+            if (command == P4Command.have) {
+                revisionKey = FileUtil.toSystemDependentName(file.getAbsolutePath());
+            }
+            if (command == P4Command.opened) {
+                revisionKey = change.getDepotPath();
+            }
+
+            if (revisionKey == null) {
+                continue;
+            }
+
+            Long revision = revisions.get(revisionKey);
+            if (revision != null && revision != 0) {
+                change.setRevision(revision);
+            }
+        }
+    }
+
+    public List<PerforceChangeList> getPendingChangeLists(P4Connection connection,
+                                                                                                                PerforceChangeCache changeCache) throws VcsException {
+        PerforceClient client = myPerforceManager.getClient(connection);
+        CommandArguments args = CommandArguments.createOn(P4Command.changes);
+        args.append("-i");
+        appendTArg(args, connection);
+        args.append("-l")
+            .append("-s").append("pending");
+
+        appendUserName(client, args);
+        appendClientName(client, args);
+
+        ExecResult execResult = executeP4Command(args.getArguments(), connection);
+        checkError(execResult, connection);
+
+        return parsePerforceChangeLists(execResult.getStdout(), connection, changeCache);
+    }
+
+    public void fillChangeCache(P4Connection connection,
+                                                            PerforceChangeCache changeCache,
+                                                            PerforceShelf shelf,
+                                                            List<PerforceChangeList> lists) throws VcsException {
+        List<Long> numbers;
+        if (lists.isEmpty()) {
+            numbers = Collections.emptyList();
+        }
+        else {
+            List<Long> list1 = new ArrayList<>(lists.size());
+            for (PerforceChangeList t : lists) {
+                list1.add(t.getNumber());
+            }
+            numbers = list1;
+        }
+        PerforceClient client = myPerforceManager.getClient(connection);
+
+        Map<Long, Pair<ChangeListData, List<FileChange>>> changeMap = describeAll(connection, numbers, false);
+        for (PerforceChangeList list : lists) {
+            Pair<ChangeListData, List<FileChange>> changes = changeMap.get(list.getNumber());
+            if (changes != null) {
+                changeCache.setChanges(connection, list.getNumber(), createPerforceChanges(client, changes.first, changes.second));
+            }
+        }
+
+        ServerVersion serverVersion = PerforceManager.getInstance(myProject).getServerVersion(connection);
+        if (serverVersion != null && serverVersion.supportsShelve()) {
+            Map<Long, Pair<ChangeListData, List<FileChange>>> shelveMap = describeAll(connection, numbers, true);
+            for (Long cl : shelveMap.keySet()) {
+                for (FileChange c : shelveMap.get(cl).second) {
+                    File localFile = PerforceManager.getFileByDepotName(c.getDepotPath(), client);
+                    shelf.addShelvedChange(connection, cl, new ShelvedChange(c.getType(), c.getDepotPath(), c.getRevisionAfter(), connection, localFile, cl));
+                }
+            }
+        }
+    }
+
+    private void appendTArg(CommandArguments arguments, @Nullable P4Connection connection) throws VcsException {
+        if (mySettings.getServerVersion(connection) >= 2003) {
+            arguments.append("-t");
+        }
+    }
+
+    private static CommandArguments appendUserName(PerforceClient client, CommandArguments args) throws VcsException {
+        String userName = client.getUserName();
+        return userName != null ? args.append("-u").append(userName) : args;
+    }
+
+    private static CommandArguments appendClientName(PerforceClient client, CommandArguments args) throws VcsException {
+        String userName = client.getName();
+        return userName != null ? args.append("-c").append(userName) : args;
+    }
+
+    private List<PerforceChangeList> parsePerforceChangeLists(String stdout, P4Connection connection,
+                                                                                                                        PerforceChangeCache changeCache) {
+        ArrayList<PerforceChangeList> result = new ArrayList<>();
+        for (ChangeListData data : OutputMessageParser.processChangesOutput(stdout)) {
+            result.add(new PerforceChangeList(data, myProject, connection, changeCache));
+        }
+        return result;
+    }
+
+    public boolean deleteChangeList(P4Connection connection, long number,
+                                                              boolean acceptUnknown, boolean acceptNonEmpty, boolean acceptShelved) throws VcsException {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.change);
+        arguments.append("-d");
+        arguments.append(String.valueOf(number));
+        ExecResult execResult = executeP4Command(arguments.getArguments(), connection);
+        if (execResult.getExitCode() == 0) {
+            return true;
+        }
+
+        String stderr = execResult.getStderr();
+        if (acceptUnknown && stderr.contains("Change " + number + " unknown.") ||
+                acceptNonEmpty && stderr.contains("open file(s) associated with it and can't be deleted") ||
+                acceptShelved && stderr.contains("shelved files associated with it and can't be deleted")) {
+            return false;
+        }
+        checkError(execResult, connection);
+        return false;
+    }
+
+    private static void adjustJobs(P4Connection connection,
+                                                                  Map<String, List<String>> changeForm,
+                                                                  @Nullable List<PerforceJob> p4jobs) {
+        changeForm.remove(JOBS);
+        if (p4jobs != null && (! p4jobs.isEmpty())) {
+            List<String> values = new ArrayList<>();
+            for (PerforceJob p4job : p4jobs) {
+                if (connection.getId().equals(p4job.getConnection().getId())) {
+                    values.add(p4job.getName());
+                }
+            }
+            changeForm.put(JOBS, values);
+        }
+    }
+
+    public long submitForConnection(P4Connection connection,
+                                                                    List<PerforceChange> changesForConnection,
+                                                                    long changeListNumber,
+                                                                    String preparedComment, @Nullable List<PerforceJob> p4jobs) throws VcsException {
+        List<String> excludedChanges = new ArrayList<>();
+        Map<String, List<String>> changeForm = getChangeSpec(connection, changeListNumber);
+        String originalDescription = getDescription(changeForm);
+        adjustJobs(connection, changeForm, p4jobs);
+        StringBuffer changeData = createChangeData(preparedComment, changesForConnection, changeForm, excludedChanges);
+        long submittedRevision;
+        long newNumber = -1;
+        if (changeListNumber == -1) {
+            CommandArguments arguments = CommandArguments.createOn(P4Command.submit);
+            appendChangeListNumber(changeListNumber, arguments);
+            arguments.append("-i");
+            ExecResult execResult = executeP4Command(arguments.getArguments(), changeData, connection);
+            checkError(execResult, connection);
+            submittedRevision = getSubmittedRevisionNumber(execResult, "Change (\\d+) created with ", 1);
+        }
+        else {
+            CommandArguments arguments = CommandArguments.createOn(P4Command.change);
+            arguments.append("-i");
+            checkError(connection.runP4CommandLine(mySettings, arguments.getArguments(), changeData), connection);
+            arguments = CommandArguments.createOn(P4Command.submit);
+            appendChangeListNumber(changeListNumber, arguments);
+            ExecResult execResult = executeP4Command(arguments.getArguments(), connection);
+            checkError(execResult, connection);
+            submittedRevision = getSubmittedRevisionNumber(execResult, "Change (\\d+) renamed change (\\d+) and ", 2);
+
+            if (!excludedChanges.isEmpty()) {
+                LOG.debug("Reopening excluded changes in new changelist");
+                newNumber = createChangeList(originalDescription, connection, excludedChanges);
+            }
+        }
+        PerforceNumberNameSynchronizer.getInstance(myProject).handleChangeListSubmitted(connection, changeListNumber, newNumber);
+        return submittedRevision;
+    }
+
+    private static long getSubmittedRevisionNumber(ExecResult execResult, String regex, int groupNumber) {
+        Matcher matcher = Pattern.compile(regex).matcher(execResult.getStdout());
+        if (matcher.find()) {
+            String group = matcher.group(groupNumber);
+            try {
+                return Long.parseLong(group);
+            }
+            catch (NumberFormatException ignore) {
+            }
+        }
+        return -1;
+    }
+
+    public long createChangeList(String description, P4Connection connection, @Nullable List<String> files)
+        throws VcsException {
+        String changeListForm = createChangeListForm(description, -1, connection, files, myPerforceManager.getClient(connection));
+        if (mySettings.showCmds) {
+            logMessage(changeListForm);
+        }
+        ExecResult execResult = executeP4Command(new String[]{P4Command.change.getName(), "-i"}, new StringBuffer(changeListForm), connection);
+        checkError(execResult, connection);
+        return PerforceChangeListHelper.parseCreatedListNumber(execResult.getStdout());
+    }
+
+    public void renameChangeList(long number, String description, P4Connection connection) throws VcsException {
+        Map<String, List<String>> oldSpec = getChangeSpec(connection, number);
+        oldSpec.put(DESCRIPTION, processDescription(description));
+        ExecResult execResult = executeP4Command(new String[]{P4Command.change.getName(), "-i"}, createStringFormRepresentation(oldSpec), connection);
+        checkError(execResult, connection);
+    }
+
+    public static List<String> processDescription(String description) {
+        List<String> result = new ArrayList<>();
+        String[] lines = StringUtil.convertLineSeparators(description).split("\n");
+        if (lines.length == 0) {
+            result.add(DEFAULT_DESCRIPTION);
+        }
+        else {
+            Collections.addAll(result, lines);
+        }
+        return result;
+    }
+
+    private String createChangeListForm(String description,
+                                                                            long changeListNumber, P4Connection connection,
+                                                                            @Nullable List<String> files, PerforceClient client) throws VcsException {
+        StringBuilder result = new StringBuilder();
+        result.append("Change:\t");
+        if (changeListNumber == -1) {
+            result.append("new");
+        }
+        else {
+            result.append(changeListNumber);
+        }
+        result.append("\n\nClient:\t");
+        result.append(client.getName());
+        result.append("\n\nUser:\t");
+        result.append(client.getUserName());
+        result.append("\n\nStatus:\t");
+        if (changeListNumber == -1) {
+            result.append("new");
+        }
+        else {
+            result.append("pending");
+        }
+        result.append("\n\nDescription:");
+        List<String> descriptionLines = processDescription(description);
+        for (String line : descriptionLines) {
+            result.append("\n\t").append(line);
+        }
+        if (changeListNumber != -1 || files != null) {
+            result.append("\n\nFiles:\n");
+            if (files != null) {
+                for(String file: files) {
+                    result.append("\t").append(file).append("\n");
+                }
+            }
+            else {
+                List<PerforceChange> list = openedInList(connection, changeListNumber);
+                for(PerforceChange openedFile: list) {
+                    result.append("\t").append(openedFile.getDepotPath()).append("\n");
+                }
+            }
+        }
+
+        return result.toString();
+    }
+
+    public List<PerforceChangeList> getSubmittedChangeLists(@Nullable String client, @Nullable String user, P4File rootP4File,
+                                                                                                                    ChangeBrowserSettings settings,
+                                                                                                                    int maxCount, boolean showIntegrated) throws VcsException {
+        String interval = dateSpec(settings.getDateAfterFilter(), settings.getDateBeforeFilter(), settings.getChangeAfterFilter(),
+                                                settings.getChangeBeforeFilter(), false);
+        List<String> fileSpecs = List.of(rootP4File.getRecursivePath() + interval);
+        return getSubmittedChangeLists(getNotNullConnection(rootP4File), client, user, maxCount, showIntegrated, fileSpecs);
+    }
+
+    public List<PerforceChangeList> getSubmittedChangeLists(P4Connection connection,
+                                                                                                                      @Nullable String client,
+                                                                                                                      @Nullable String user,
+                                                                                                                      int maxCount, boolean showIntegrated, List<String> fileSpecs)
+        throws VcsException {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.changes);
+        arguments.append("-s").append("submitted");
+        if (showIntegrated) {
+            arguments.append("-i");
+        }
+        appendTArg(arguments, connection);
+        arguments.append("-l");
+
+        if (client != null && !client.isEmpty()) {
+            arguments.append("-c").append(client);
+        }
+        if (user != null && !user.isEmpty()) {
+            arguments.append("-u").append(user);
+        }
+        if (maxCount > 0) {
+            arguments.append("-m").append(maxCount);
+        }
+
+        for (String spec : fileSpecs) {
+            arguments.append(spec);
+        }
+
+        ExecResult execResult = executeP4Command(arguments.getArguments(), connection);
+        checkError(execResult, connection);
+        return parsePerforceChangeLists(execResult.getStdout(), connection, new PerforceChangeCache(myProject));
+    }
+
+    private static String dateSpec(Date after, Date before, Long afterChange, Long beforeChange, boolean strictlyAfter) {
+
+        if (after == null && before == null && afterChange == null && beforeChange == null) {
+            return "";
+        }
+
+        StringBuilder result = new StringBuilder();
+        result.append('@');
+        if (after != null) {
+            result.append(DATE_SPEC_DATE_FORMAT.format(after.toInstant().atZone(ZoneId.systemDefault())));
+        }
+        else if (afterChange != null) {
+            result.append(afterChange.longValue() + (strictlyAfter ? 1 : 0));
+        }
+        else {
+            result.append(DATE_SPEC_DATE_FORMAT.format(Instant.ofEpochMilli(0).atZone(ZoneId.systemDefault())));
+        }
+        result.append(',');
+        result.append('@');
+        if (before != null) {
+            result.append(DATE_SPEC_DATE_FORMAT.format(before.toInstant().atZone(ZoneId.systemDefault())));
+        }
+        else if (beforeChange != null) {
+            result.append(beforeChange.longValue());
+        }
+        else {
+            result.append(NOW);
+        }
+
+        return result.toString();
+    }
+
+    public List<PerforceChange> openedInList(P4Connection connection, long number) throws VcsException {
+        CommandArguments args = CommandArguments.createOn(P4Command.opened);
+        args.append("-c").append(number);
+        ExecResult execResult = executeP4Command(args.getArguments(), connection);
+        if (StringUtil.toLowerCase(execResult.getStderr()).contains(STANDARD_REVERT_UNCHANGED_ERROR_MESSAGE)) {
+            // no files opened
+            return new ArrayList<>();
+        }
+        checkError(execResult, connection);
+        try {
+            return PerforceOutputMessageParser.processOpenedOutput(execResult.getStdout());
+        }
+        catch (IOException e) {
+            throw new VcsException(e);
+        }
+    }
+
+    public List<PerforceChange> opened(P4Connection connection, Collection<FilePath> paths, boolean throwIfNotUnderClient) throws VcsException {
+        if (paths.size() > OPENED_SIZE) {
+            List<PerforceChange> result = new ArrayList<>();
+            for (List<FilePath> filePaths : JBIterable.from(paths).split(OPENED_SIZE, false)) {
+                result.addAll(openedImpl(connection, filePaths, throwIfNotUnderClient));
+            }
+            return result;
+        }
+        return openedImpl(connection, paths, throwIfNotUnderClient);
+    }
+
+    private List<PerforceChange> openedImpl(P4Connection connection, Collection<FilePath> paths, boolean throwIfNotUnderClient) throws VcsException {
+        CommandArguments args = CommandArguments.createOn(P4Command.opened);
+        for (FilePath path : paths) {
+            args.append(P4File.create(path).getEscapedPath());
+        }
+        ExecResult execResult = executeP4Command(args.getArguments(), connection);
+        String err = StringUtil.toLowerCase(execResult.getStderr());
+        if ((! throwIfNotUnderClient) && (err.contains(STANDARD_REVERT_UNCHANGED_ERROR_MESSAGE) ||
+                err.contains(NOT_UNDER_CLIENT_ROOT_MESSAGE) || err.contains(NOT_IN_CLIENT_VIEW_MESSAGE))) {
+        }
+        else {
+            checkError(execResult, connection);
+        }
+        try {
+            return PerforceOutputMessageParser.processOpenedOutput(execResult.getStdout());
+        }
+        catch (IOException e) {
+            throw new VcsException(e);
+        }
+    }
+
+    private static String getDescription(Map<String, List<String>> changeForm) {
+        List<String> strings = changeForm.get(DESCRIPTION);
+        if (strings == null) {
+            return "";
+        }
+        return StringUtil.join(strings, "\n");
+    }
+
+    private static StringBuffer createChangeData(String preparedComment,
+                                                                                              List<PerforceChange> actualChanges,
+                                                                                              Map<String, List<String>> changeForm,
+                                                                                              List<String> excludedChanges) {
+        setDescriptionToForm(changeForm, preparedComment);
+
+        List<String> changes = changeForm.get(FILES);
+
+        if (changes != null) {
+            for (String changeString : changes) {
+                String fileString = changeString.trim();
+                int typeIndex = fileString.indexOf("#");
+                String depotPath = fileString.substring(0, typeIndex - 1);
+                if (findChangeByDepotPath(actualChanges, depotPath) == null) {
+                    excludedChanges.add(changeString);
+                }
+            }
+            changes.removeAll(excludedChanges);
+        }
+
+        return createStringFormRepresentation(changeForm);
+
+    }
+
+    public static void setDescriptionToForm(Map<String, List<String>> changeForm, String preparedComment) {
+        List<String> description = changeForm.get(DESCRIPTION);
+        if (description != null) {
+            description.clear();
+            description.addAll(getAllLines(preparedComment));
+        }
+        else {
+            changeForm.put(DESCRIPTION, getAllLines(preparedComment));
+        }
+    }
+
+    private static List<String> getAllLines(String preparedComment) {
+        List<String> result = new ArrayList<>();
+        for (String line1 : LineTokenizer.tokenize(preparedComment.trim(), false)) {
+            result.add(line1.trim());
+        }
+        return result;
+    }
+
+    private static @Nullable PerforceChange findChangeByDepotPath(List<PerforceChange> actualChanges, String depotPath) {
+        for (PerforceChange change : actualChanges) {
+            if (change.getDepotPath().equals(depotPath)) {
+                return change;
+            }
+        }
+        return null;
+    }
+
+    public static StringBuffer createStringFormRepresentation(Map<String, List<String>> changeForm) {
+        StringBuffer result = new StringBuffer();
+        for (String field : changeForm.keySet()) {
+            result.append("\n");
+            result.append(field);
+
+            List<String> values = changeForm.get(field);
+            result.append("\n");
+            for (String value : values) {
+                result.append("\t");
+                result.append(value);
+                result.append("\n");
+            }
+        }
+
+        return result;
+    }
+
+    public List<String> getBranches(P4Connection connection) throws VcsException {
+        ExecResult result = executeP4Command(new String[]{"branches"}, connection);
+        checkError(result, connection);
+        return OutputMessageParser.processBranchesOutput(result.getStdout());
+    }
+
+    public BranchSpec loadBranchSpec(String branchName, P4Connection connection) throws VcsException {
+        String[] p4args = {"branch",
+            "-o",
+            branchName};
+        ExecResult execResult = executeP4Command(p4args, connection);
+        checkError(execResult, connection);
+        Map<String, List<String>> branchSpecForm = FormParser.execute(execResult.getStdout(), new String[]{OWNER,
+            DESCRIPTION,
+            VIEW});
+        return new BranchSpec(branchSpecForm);
+    }
+
+    public Map<String, List<String>> loadClient(String clientName, P4Connection connection) throws VcsException {
+        String[] p4args = {"client",
+            "-o",
+            clientName};
+        ExecResult execResult = executeP4Command(p4args, connection);
+        checkError(execResult, connection);
+
+        return FormParser.execute(execResult.getStdout(), new String[]{"Client:",
+            "Owner:",
+            "Update:",
+            "Access:",
+            "Host:",
+            "Description:",
+            CLIENTSPEC_ROOT,
+            CLIENTSPEC_ALTROOTS,
+            CLIENT_OPTIONS,
+            "LineEnd:",
+            VIEW});
+    }
+
+    public byte [] getByteContent(P4File file, @Nullable String revisionNumber) throws VcsException {
+        return getByteContent(file.getEscapedPath(), revisionNumber, getNotNullConnection(file));
+    }
+
+    public byte [] getByteContent(BaseRevision baseRevision, P4Connection connection) throws VcsException {
+        return getByteContent(baseRevision.getDepotPath(), baseRevision.getRevisionNum(), connection);
+    }
+    public byte [] getByteContent(String depotPath, @Nullable String revisionNumber, P4Connection connection) throws VcsException {
+        File tempFile = null;
+        try {
+            tempFile = FileUtil.createTempFile("ijP4Print", "");
+            String[] p4args = {"print", "-q", "-o", tempFile.getPath(), depotPath + (revisionNumber == null ? "" : revisionNumber)};
+            ExecResult execResult = executeP4Command(p4args, connection);
+            checkError(execResult, connection);
+            ContentRevisionCache.checkContentsSize(depotPath, tempFile.length());
+            return Files.readAllBytes(tempFile.toPath());
+        }
+        catch (IOException e) {
+            throw new VcsException(e);
+        }
+        finally {
+            if (tempFile != null) {
+                FileUtil.delete(tempFile);
+            }
+        }
+    }
+
+    public byte [] getContent(FilePath file, String revisionNumber) throws VcsException {
+        P4File p4File = P4File.create(file);
+        return getByteContent(getDepotPath(p4File), revisionNumber, getNotNullConnection(p4File));
+    }
+
+    private String getDepotPath(P4File p4File) throws VcsException {
+        return p4File.getFstat(myProject, true).depotFile;
+    }
+
+    public LocalPathsSet getResolvedWithConflictsMap(P4Connection connection, Collection<VirtualFile> roots) throws VcsException {
+        List<String> args = new ArrayList<>();
+        for (VirtualFile root : roots) {
+            args.add(P4File.create(root).getRecursivePath());
+        }
+
+        ExecResult execResult = executeP4Command(new String[]{P4Command.resolve.getName(), "-n", "-t"}, args, null, new PerforceContext(connection));
+        return new LocalPathsSet(processResolveOutput(execResult.getStdout()).keySet());
+    }
+
+    public LinkedHashSet<VirtualFile> getResolvedWithConflicts(P4Connection connection, @Nullable VirtualFile root) throws VcsException {
+        String element = root == null ? null : P4File.create(root).getRecursivePath();
+        //noinspection SSBasedInspection
+        return getResolvedWithConflicts(connection, element == null ? Collections.emptyList() : Collections.singletonList(element));
+    }
+
+    public LinkedHashSet<VirtualFile> getResolvedWithConflicts(P4Connection connection, Collection<String> fileSpecs) throws VcsException {
+        CommandArguments args = CommandArguments.createOn(P4Command.resolve);
+        args.append("-n");
+        args.append("-t");
+        for (String spec : fileSpecs) {
+            args.append(spec);
+        }
+        ExecResult execResult = executeP4Command(args.getArguments(), connection);
+        LinkedHashSet<VirtualFile> result = new LinkedHashSet<>();
+        if (StringUtil.toLowerCase(execResult.getStderr()).contains(NO_FILES_TO_RESOLVE_MESSAGE)) {
+            return result;
+        }
+
+        LinkedHashMap<String, BaseRevision> map = processResolveOutput(execResult.getStdout());
+        for (String path : map.keySet()) {
+            VirtualFile element = StandardFileSystems.local().findFileByPath(path);
+            if (element != null) {
+                result.add(element);
+            }
+        }
+        return result;
+    }
+
+    public @Nullable BaseRevision getBaseRevision(P4File file) throws VcsException {
+        P4Connection connection = getNotNullConnection(file);
+        ExecResult execResult = executeP4Command(new String[]{"resolve",
+            "-n", "-o", "-t",
+            file.getEscapedPath()}, connection);
+        String stdout = execResult.getStdout();
+        if (StringUtil.toLowerCase(stdout).contains(NO_FILES_TO_RESOLVE_MESSAGE)) {
+            return null;
+        }
+        checkError(execResult, connection);
+        Map<String, BaseRevision> result = processResolveOutput(stdout);
+        return result.isEmpty() ? null : result.values().iterator().next();
+    }
+
+    public static LinkedHashMap<String, BaseRevision> processResolveOutput(String output) {
+        LinkedHashMap<String, BaseRevision> result = new LinkedHashMap<>();
+        for (String line : StringUtil.splitByLines(output)) {
+            String separator = MERGING_MESSAGE;
+            int index = line.indexOf(separator);
+            if (index < 0) {
+                index = line.indexOf(separator = UBINARY_MERGING_MESSAGE);
+            }
+            if (index < 0) {
+                index = line.indexOf(separator = BINARY_MERGING_MESSAGE);
+            }
+            if (index >= 0) {
+                String file = line.substring(0, index).trim();
+                BaseRevision revision = createBaseRevision(line.substring(index + separator.length()), result.get(file));
+                result.put(file, revision);
+            }
+        }
+        return result;
+    }
+
+    private static @Nullable BaseRevision createBaseRevision(String line, @Nullable BaseRevision existing) {
+        int usingBasePosition = line.indexOf(USING_BASE_MESSAGE);
+        if (usingBasePosition < 0) {
+            return null;
+        }
+        String sourcePath = line.substring(0, usingBasePosition);
+
+        int sourceRevPosition = StringUtil.indexOfAny(sourcePath, "#@");
+        String sourceRevision = sourceRevPosition >= 0 ? sourcePath.substring(sourceRevPosition).trim() : null;
+        int revPosition = StringUtil.indexOfAny(line, "#@", usingBasePosition, line.length());
+
+        if (revPosition < 0) {
+            return null;
+        }
+        String basePath = line.substring(usingBasePosition + USING_BASE_MESSAGE.length(), revPosition).trim();
+
+        String revision = line.substring(revPosition).trim();
+        try {
+            String revisionNum = existing == null ? revision : existing.getRevisionNum();
+            return new BaseRevision(revisionNum, sourceRevision, basePath);
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    public void resolveToYours(P4File file) throws VcsException {
+        resolve(file, "-ay");
+    }
+
+    public void resolveAutomatically(P4File file) throws VcsException {
+        resolve(file, "-am");
+    }
+
+    private void resolve(P4File file, String resolveMode) throws VcsException {
+        String[] p4args = {"resolve", resolveMode, file.getRecursivePath()};
+        P4Connection connection = getNotNullConnection(file);
+        ExecResult execResult = executeP4Command(p4args, connection);
+        String stdErr = StringUtil.toLowerCase(execResult.getStderr());
+        if (!stdErr.contains(NO_FILES_TO_RESOLVE_MESSAGE)) {
+            checkError(execResult, connection);
+        }
+    }
+
+    public ExecResult integrate(String branchName,
+                                                            P4File path,
+                                                            long changeListNum,
+                                                            @Nullable String integrateChangeListNum,
+                                                            boolean reverse,
+                                                            P4Connection connection) {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.integrate);
+        appendChangeListNumber(changeListNum, arguments);
+
+        if (reverse) {
+            arguments.append("-r");
+        }
+
+        arguments.append("-b").append(branchName);
+
+        boolean insideBranch;
+        String depotPath;
+        try {
+            depotPath = where(path, connection).getDepot() + "/";
+            insideBranch = isInsideBranch(branchName, connection, depotPath);
+        }
+        catch (VcsException e) {
+            ExecResult result = new ExecResult();
+            result.setException(e);
+            return result;
+        }
+
+        if (insideBranch == reverse) {
+            arguments.append("-s");
+        }
+
+        if (integrateChangeListNum == null) {
+            arguments.append(depotPath + "...");
+        }
+        else {
+            arguments.append(depotPath + "...@" + integrateChangeListNum + ",@" + integrateChangeListNum);
+        }
+
+        return executeP4Command(arguments.getArguments(), connection);
+    }
+
+    public boolean have(P4File file) throws VcsException {
+        P4Connection connection = myConnectionManager.getConnectionForFile(file);
+        if (connection == null) {
+            return false;
+        }
+
+        Map<String, Long> haveRevisions = new HashMap<>();
+        P4Parser haveParser = new P4HaveParser(myPerforceManager, haveRevisions);
+        doExecute(Collections.singletonList(getP4FilePath(file, file.isDirectory(), file.isDirectory())), connection, haveParser, false);
+        return !haveRevisions.isEmpty();
+    }
+
+    public long haveRevision(P4File file) throws VcsException {
+        P4Connection connection = myConnectionManager.getConnectionForFile(file);
+        if (connection == null) {
+            return -1;
+        }
+
+        Map<String, Long> haveRevisions = new HashMap<>();
+        P4Parser haveParser = new P4HaveParser(myPerforceManager, haveRevisions);
+        doExecute(Collections.singletonList(getP4FilePath(file, file.isDirectory(), false)), connection, haveParser, false);
+        return haveRevisions.isEmpty() ? -1 : haveRevisions.values().iterator().next();
+    }
+
+    public @Nullable VcsRevisionNumber getCurrentRevision(P4File p4File) {
+        try {
+            long curRev = haveRevision(p4File);
+            // cached
+            FStat fstat = p4File.getFstat(myProject, false);
+            long cachedRev = Long.parseLong(fstat.haveRev);
+            if (cachedRev != curRev) {
+                // go for head change also
+                fstat = p4File.getFstat(myProject, true);
+            }
+            return PerforceVcsRevisionNumber.createFromFStat(fstat);
+        }
+        catch (VcsException | NumberFormatException e) {
+            return null;
+        }
+    }
+
+    public void executeMultiple(PathsHelper helper,
+                                                            P4Connection connection, P4Parser consumer) throws VcsException {
+        if (helper.isEmpty()) {
+            return;
+        }
+        List<String> args = helper.getRequestString();
+
+        doExecute(args, connection, consumer, true);
+    }
+
+    static String getP4FilePath(P4File file, boolean isDirectory, boolean recursively) {
+        String escapedPath = file.getEscapedPath();
+        return isDirectory ? escapedPath + "/" + (recursively ? "..." : "*") : escapedPath;
+    }
+
+    private void doExecute(List<String> filesSpec,
+                                                  P4Connection connection,
+                                                  P4Parser consumer,
+                                                  boolean longTimeout) throws VcsException {
+        // See http://www.perforce.com/perforce/doc.052/manuals/cmdref/have.html#1040665
+        // According to Perforce docs output will be presented patterned like: depot-file#revision-number - local-path
+        // One line per file
+
+        PerforceContext context = new PerforceContext(connection, longTimeout, false);
+
+        for (List<String> chunk : Lists.partition(new ArrayList<>(new LinkedHashSet<>(filesSpec)), CHUNK_SIZE)) {
+            ExecResult execResult = executeP4Command(new String[]{consumer.getCommand().getName()}, chunk, null, context);
+            String stderr = execResult.getStderr();
+            boolean notUnderRoot =
+                stderr.contains(NOT_OPENED_ON_CLIENT_MESSAGE) || stderr.contains(NOT_ON_CLIENT_MESSAGE) || stderr.contains(NOT_UNDER_CLIENT_ROOT_MESSAGE);
+            if (! notUnderRoot) {
+                // Perforce bug: if ask "p4 have <local path>/*" or "p4 opened <local path>/*" and in <local path> directory it would be unversioned file with symbols
+                // that should be escaped, Perforce reports "Invalid revision number" somewhy
+                // since we do NOT pass revision number in have string, we can filter out this message and use other strings of output
+                if (! stderr.contains(INVALID_REVISION_NUMBER)) {
+                    checkError(execResult, connection);
+                }
+            }
+            else {
+                LOG.debug("Problem while doing '" + consumer.getCommand().getName() + "': " + stderr);
+            }
+            Ref<VcsException> vcsExceptionRef = new Ref<>();
+            try {
+                execResult.allowSafeStdoutUsage(inputStream -> {
+                    try {
+                        consumer.readOutput(inputStream);
+                    }
+                    catch (VcsException e) {
+                        vcsExceptionRef.set(e);
+                    }
+                });
+            }
+            catch (IOException e) {
+                throw new VcsException(e);
+            }
+            if (! vcsExceptionRef.isNull()) {
+                throw vcsExceptionRef.get();
+            }
+        }
+    }
+
+    public P4Revision[] filelog(P4File file, boolean showBranches) throws VcsException {
+        return filelog(getNotNullConnection(file), file.getRecursivePath(), showBranches);
+    }
+
+    public P4Revision[] filelog(P4Connection connection, String path, boolean showBranches) throws VcsException {
+        CommandArguments arguments = createFilelogArgs(showBranches, connection).append(path);
+        ExecResult execResult = executeP4Command(arguments.getArguments(), connection);
+        checkError(execResult, connection);
+
+        return parseLogOutput(execResult, isFilelogNewDateVersion(connection));
+    }
+
+    public List<String> files(Collection<String> escapedPaths, P4Connection connection) throws VcsException {
+        if (escapedPaths.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        ExecResult execResult = executeP4Command(CommandArguments.createOn(P4Command.files).getArguments(), escapedPaths, null, new PerforceContext(connection));
+        if (execResult.getExitCode() != 0) {
+            checkError(execResult, connection);
+        }
+        return OutputMessageParser.readOutputLines(execResult.getStdout());
+    }
+
+    private CommandArguments createFilelogArgs(boolean showBranches, @Nullable P4Connection connection) throws VcsException {
+        CommandArguments arguments = CommandArguments.createOn(P4Command.filelog);
+        if (showBranches) {
+            arguments.append("-i");
+        }
+        arguments.append("-l");
+        if (isFilelogNewDateVersion(connection)) {
+            arguments.append("-t");
+        }
+        int limit = VcsConfiguration.getInstance(myProject).LIMIT_HISTORY ? VcsConfiguration.getInstance(myProject).MAXIMUM_HISTORY_ROWS : -1;
+        if (limit > 0) {
+            arguments.append("-m");
+            arguments.append(limit);
+        }
+        return arguments;
+    }
+
+    private boolean isFilelogNewDateVersion(@Nullable P4Connection connection) throws VcsException {
+        ServerVersion serverVersion = mySettings.getServerFullVersion(connection);
+        if (serverVersion == null) {
+            return false;
+        }
+        return serverVersion.getVersionYear() >= 2003 || serverVersion.getVersionYear() == 2002 && serverVersion.getVersionNum() > 1;
+    }
+
+    private static P4Revision[] parseLogOutput(ExecResult execResult, boolean newDateFormat) throws VcsException {
+        try {
+            List<P4Revision> p4Revisions = OutputMessageParser.processLogOutput(execResult.getStdout(), newDateFormat);
+            return p4Revisions.toArray(new P4Revision[0]);
+        }
+        catch (DateTimeParseException e) {
+            throw new VcsException(e);
+        }
+    }
+
+    public AnnotationInfo annotate(P4Connection connection, String filePath, long revision) throws VcsException {
+        if (revision != -1) {
+            filePath += "#" + revision;
+        }
+        List<String> commands = new ArrayList<>();
+        commands.add("annotate");
+        commands.add("-q");
+        boolean useChangelistNumbers = false;
+        if (mySettings.SHOW_BRANCHES_HISTORY && isAnnotateBranchSupported(connection)) {
+            commands.add("-i");
+            useChangelistNumbers = true;
+        }
+        if (isAnnotateIgnoringWhitespaceSupported(connection)) {
+            commands.add("-dw");
+        }
+        else {
+            commands.add("-dl");
+        }
+        commands.add(filePath);
+        ExecResult execResult = executeP4Command(ArrayUtil.toStringArray(commands), connection);
+        checkError(execResult, connection);
+        try {
+            return new AnnotationInfo(execResult.getStdout(), useChangelistNumbers);
+        }
+        catch (IOException e) {
+            throw new VcsException(e);
+        }
+    }
+
+    private boolean isAnnotateBranchSupported(@Nullable P4Connection connection) throws VcsException {
+        ServerVersion version = myPerforceManager.getServerVersion(connection);
+        if (version == null) {
+            return false;
+        }
+        return version.getVersionYear() > 2005 || version.getVersionYear() == 2005 && version.getVersionNum() >= 2;
+    }
+
+    private boolean isAnnotateIgnoringWhitespaceSupported(@Nullable P4Connection connection) throws VcsException {
+        return isAnnotateBranchSupported(connection);
+    }
+
+    public List<ResolvedFile> getResolvedFiles(P4Connection connection, Collection<VirtualFile> roots) throws VcsException {
+        List<String> args = new ArrayList<>();
+        for (VirtualFile root : roots) {
+            args.add(P4File.create(root).getRecursivePath());
+        }
+        ExecResult execResult = executeP4Command(new String[]{P4Command.resolved.getName()}, args, null, new PerforceContext(connection));
+        checkError(execResult, connection);
+        try {
+            String clientRoot = myPerforceManager.getClientRoot(connection);
+            return PerforceOutputMessageParser.processResolvedOutput(execResult.getStdout(),
+                                                                                                                              // this convertor will replace possibly not canonic
+                                                                                                                              // client root in a path (client root returned by perforce manager is already canonicalized)
+                                                                                                                              o -> myPerforceManager.convertP4ParsedPath(clientRoot, o));
+        }
+        catch (IOException e) {
+            throw new VcsException(e);
+        }
+    }
+
+    public List<String> getJobSpecification(P4Connection connection) throws VcsException {
+        ExecResult execResult = executeP4Command(new String[]{"jobspec", "-o"}, connection);
+        checkError(execResult, connection);
+        String stdout = execResult.getStdout();
+        SPECIFICATION_LOG.debug(stdout);
+        return OutputMessageParser.readOutputLines(stdout);
+    }
+
+    public List<String> getJobs(P4Connection connection, JobsSearchSpecificator specificator) throws VcsException {
+        String[] strings = specificator.addParams(new String[]{"jobs", "-l"});
+        ExecResult execResult = executeP4Command(strings, connection);
+        checkError(execResult, connection);
+        return OutputMessageParser.readOutputLines(execResult.getStdout());
+    }
+
+    public List<String> getJobDetails(PerforceJob job) throws VcsException {
+        ExecResult execResult = executeP4Command(new String[] {"job", "-o", job.getName()}, job.getConnection());
+        checkError(execResult, job.getConnection());
+        return OutputMessageParser.readOutputLines(execResult.getStdout());
+    }
+
+    public List<String> getJobsForChange(P4Connection connection, long number) throws VcsException {
+        ExecResult execResult = executeP4Command(new String[] {"fixes", "-c", String.valueOf(number)}, connection);
+        checkError(execResult, connection);
+        return OutputMessageParser.readOutputLines(execResult.getStdout());
+    }
+
+    public void addJobForList(P4Connection connection, long number, String name) throws VcsException {
+        ExecResult execResult = executeP4Command(new String[] {"fix", "-c", String.valueOf(number), name}, connection);
+        checkError(execResult, connection);
+    }
+
+    public void removeJobFromList(P4Connection connection, long number, String name) throws VcsException {
+        ExecResult execResult = executeP4Command(new String[] {"fix", "-d", "-c", String.valueOf(number), name}, connection);
+        checkError(execResult, connection);
+    }
+
+    // The method is used in "Upsource Integration" plugin
+    public ExecResult executeP4Command(String[] p4args, P4Connection connection) {
+        return executeP4Command(p4args, null, connection);
+    }
+
+    private ExecResult executeP4Command(String[] p4args, @Nullable StringBuffer inputStream, P4Connection connection) {
+        return executeP4Command(p4args, Collections.emptyList(), inputStream, new PerforceContext(connection));
+    }
+
+    private ExecResult executeP4Command(String[] p4cmd, Collection<String> args, @Nullable StringBuffer inputStream, PerforceContext ctx) {
+        // construct the command-line
+        ExecResult retVal = new ExecResult();
+        if (!mySettings.ENABLED) {
+            retVal.setException(new VcsException(PerforceLocalize.exceptionTextPerforceIntegrationIsDisabled().get()));
+            retVal.setStderr(PerforceLocalize.exceptionTextPerforceIntegrationIsDisabled().get());
+            return retVal;
+        }
+
+        File tempFile = null;
+        try {
+            String presentableCmdLine = StringUtil.join(p4cmd, " ") + " " + StringUtil.join(args, " ");
+            ProgressIndicator progressIndicator = ProgressManager.getInstance().getProgressIndicator();
+            if (progressIndicator != null) {
+                progressIndicator.setText2(PerforceLocalize.progressText2P4Status(StringUtil.trimLog(presentableCmdLine, 239).trim()).get());
+                progressIndicator.setText(PerforceLocalize.progressTextPerforceCommand().get());
+            }
+
+            if (mySettings.showCmds) {
+                logMessage(StringUtil.trimLog(presentableCmdLine, 10 * 1000));
+            }
+
+            String[] p4args;
+            if (shouldPassArgumentsViaFile(args)) {
+                tempFile = createArgumentFile(args);
+                p4args = ArrayUtil.mergeArrays(new String[]{"-x", tempFile.getPath()}, p4cmd);
+            }
+            else {
+                p4args = ArrayUtil.mergeArrays(p4cmd, ArrayUtil.toStringArray(args));
+            }
+
+            ctx.runP4Command(mySettings, p4args, retVal, inputStream);
+        }
+        catch (PerforceTimeoutException | VcsException | InterruptedException | IOException e) {
+            retVal.setException(e);
+        }
+        finally {
+            if (tempFile != null) {
+                FileUtil.delete(tempFile);
+            }
+        }
+
+        if (mySettings.showCmds) {
+            logMessage("\n" + retVal);
+        }
+
+        if (mySettings.USE_LOGIN && (retVal.getStderr().contains(SESSION_EXPIRED_MESSAGE) || retVal.getStderr().contains(PASSWORD_INVALID_MESSAGE))) {
+            myLoginManager.notLogged(ctx.connection);
+            try {
+                if (!ctx.justLogged && myLoginManager.silentLogin(ctx.connection)) {
+                    retVal.cleanup();
+                    return executeP4Command(p4cmd, args, inputStream, new PerforceContext(ctx.connection, ctx.longTimeout, true));
+                }
+            }
+            catch (VcsException e) {
+                retVal.setException(createCorrectException(String.valueOf(e.getMessage()), mySettings, ctx.connection));
+                return retVal;
+            }
+            return retVal;
+        }
+
+        if (!mySettings.USE_LOGIN &&
+                (retVal.getStderr().contains(PASSWORD_INVALID_MESSAGE) || retVal.getStderr().contains(PASSWORD_NOT_ALLOWED_MESSAGE) || retVal.getStderr().contains(PASSWORD_EXPIRED))) {
+            myLoginManager.notLogged(ctx.connection);
+        }
+
+        return retVal;
+    }
+
+    private static File createArgumentFile(Collection<String> args) throws VcsException {
+        try {
+            File tempFile = FileUtil.createTempFile("p4batch", ".txt");
+            FileUtil.writeToFile(tempFile, StringUtil.join(args, System.lineSeparator()));
+            tempFile.deleteOnExit();
+            return tempFile;
+        }
+        catch (IOException e) {
+            throw new VcsException(e);
+        }
+    }
+
+    private static boolean shouldPassArgumentsViaFile(Collection<String> args) {
+        int totalLength = 0;
+        for (String arg : args) {
+            totalLength += arg.length() + 1;
+        }
+        return totalLength > 2000;
+    }
+
+    private static String createPasswordNotAllowedButSetMessage(P4Connection connection) {
+        return PerforceLocalize.connectionPasswordNotAllowed(connection.getWorkingDir()).get();
+    }
+
+    public static File getDumpFile() {
+        return new File(ContainerPathManager.get().getLogPath(), DUMP_FILE_NAME);
+    }
+
+    private static void logMessage(String message) {
+        File file = getDumpFile();
+        String s = "\n" + new Time(System.currentTimeMillis()) + " " + message;
+        try {
+            if (file.length() > MAX_LOG_LENGTH) {
+                FileUtil.delete(file);
+            }
+            FileUtil.writeToFile(file, s.getBytes(StandardCharsets.UTF_8), true);
+        }
+        catch (Exception e) {
+            //ignore
+        }
+    }
+
+    private static VcsException createCorrectException(String stderr, PerforceSettings settings, @Nullable P4Connection connection) {
+        if (connection != null) {
+            if (stderr.contains(PASSWORD_NOT_ALLOWED_MESSAGE)) {
+                return new PerforcePasswordNotAllowedException(settings.USE_LOGIN && settings.useP4CONFIG ? createPasswordNotAllowedButSetMessage(connection) : stderr,
+                                                                                                              settings.getProject(), connection);
+            }
+            if (stderr.contains(PASSWORD_INVALID_MESSAGE) || stderr.contains(PASSWORD_INVALID_MESSAGE2) ||
+                    stderr.contains(SESSION_EXPIRED_MESSAGE) || stderr.contains(PASSWORD_EXPIRED) ||
+                    stderr.contains(AUTHENTICATION_FAILED_MESSAGE)) {
+                return new PerforceAuthenticationException(stderr, connection, settings.getProject());
+            }
+        }
+        if (stderr.contains("must create client") && stderr.contains("to access local files") || stderr.contains("Password must be set before access can be granted")) {
+            return new VcsConnectionProblem(stderr);
+        }
+        if (stderr.contains("Connect to server failed")) {
+            return new PerforceServerUnavailable(stderr);
+        }
+        return new VcsException(stderr);
+    }
+
+    public ExecResult checkError(ExecResult result, @Nullable P4Connection connection) throws VcsException {
+        checkError(result, mySettings, connection);
+        return result;
+    }
+
+    public static void checkError(ExecResult result, PerforceSettings settings, @Nullable P4Connection connection) throws VcsException {
+        Throwable exception = result.getException();
+        boolean error = exception != null || containsErrorOutput(result) || result.getExitCode() < 0;
+        if (error) {
+            String errorOutput = result.getStderr();
+            if (exception != null) {
+                result.cleanup();
+                if (exception instanceof PerforceAuthenticationException) {
+                    throw (PerforceAuthenticationException)exception;
+                }
+                throw new VcsException(exception);
+            }
+            else {
+                String stdErr = errorOutput.trim();
+                if (!stdErr.isEmpty()) {
+                    boolean hasErrors = false;
+                    for (String s : stdErr.split("\n")) {
+                        if (StringUtil.isNotEmpty(s) && !StringUtil.toLowerCase(s).contains(NO_FILES_RESOLVED_MESSAGE)) {
+                            hasErrors = true;
+                            break;
+                        }
+                    }
+                    if (hasErrors) {
+                        String stdOut = result.getStdout().trim();
+                        String message = StringUtil.isNotEmpty(stdOut) ? errorOutput + "\n" + stdOut : errorOutput;
+                        throw createCorrectException(message, settings, connection);
+                    }
+                }
+                else {
+                    throw new VcsException(PerforceLocalize.errorP4ReturnedErrorCode(result.getExitCode()).get());
+                }
+            }
+        }
+    }
+
+    public static VcsException[] checkErrors(ExecResult result, PerforceSettings settings, P4Connection connection) {
+        Throwable exception = result.getException();
+        boolean error = result.getExitCode() != 0 || exception != null || containsErrorOutput(result);
+        if (error) {
+            String errorOutput = result.getStderr();
+            result.cleanup();
+            if (exception != null) {
+                return new VcsException[] { new VcsException(exception) };
+            }
+            else {
+                String[] lines = errorOutput.split("\n");
+                VcsException[] errors = new VcsException[lines.length];
+                for(int i=0; i<lines.length; i++) {
+                    errors [i] = createCorrectException(lines [i], settings, connection);
+                }
+                return errors;
+            }
+        }
+        return VcsException.EMPTY_ARRAY;
+    }
+
+    private static boolean containsErrorOutput(ExecResult result) {
+        String errorOutput = result.getStderr().trim();
+        return !errorOutput.contains(FILES_UP_TO_DATE) && errorOutput.length() > 2;
+    }
+
+    public P4WhereResult where(P4File file, P4Connection connection) throws VcsException {
+        return where(file.getEscapedPath(), connection);
+    }
+
+    public P4WhereResult whereDir(P4File dir, P4Connection connection) throws VcsException {
+        P4WhereResult result = where(dir.getRecursivePath(), connection);
+        return new P4WhereResult(removeTail(result.getLocal()), removeTail(result.getLocalRootDependent()), removeTail(result.getDepot()));
+    }
+
+    private static String removeTail(String s) {
+        return StringUtil.trimEnd(s, "/...");
+    }
+
+    public P4WhereResult where(String escapedPath, P4Connection connection) throws VcsException {
+        ExecResult execResult = executeP4Command(new String[]{"where", escapedPath}, connection);
+        checkError(execResult, connection);
+
+        String out = getLastLine(execResult);
+
+        PerforceClient client = myPerforceManager.getClient(connection);
+
+        List<String> roots;
+        Collection<String> collection = client.getRoots();
+        if (collection.isEmpty()) {
+            roots = Collections.emptyList();
+        }
+        else {
+            List<String> list = new ArrayList<>(collection.size());
+            for (String t : collection) {
+                String rawRoot = myPerforceManager.getRawRoot(t);
+                list.add((rawRoot != null ? rawRoot : t).replace('\\', '/'));
+            }
+            roots = list;
+        }
+        WhereParser parser = new WhereParser(out, roots, client.getName(), escapedPath);
+        parser.execute();
+
+        return new P4WhereResult(myPerforceManager.convertP4ParsedPath(null, parser.getLocal()), parser.getLocalRootRelative(),
+                                                          parser.getDepot());
+    }
+
+    private static String getLastLine(ExecResult execResult) throws VcsException {
+        String result = execResult.getStdout();
+        String[] lines = result.trim().split("\n");
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String line = lines[i];
+            if (line.startsWith("-")) {
+                continue;
+            }
+            return line;
+        }
+        throw new VcsException(PerforceLocalize.errorP4WhereWrongResult(result).get());
+    }
+
+    public ClientVersion getClientVersion() {
+        P4Connection connection = new PerforceLocalConnection(StringUtil.notNullize(myProject.getBasePath()));
+        // just "p4 -V"
+        try {
+            ExecResult result = executeP4Command(new String[]{"-V"}, connection);
+            checkError(result, connection);
+            String out = result.getStdout();
+            Map<String, List<String>> map = FormParser.execute(out, new String[]{CLIENT_VERSION_REV});
+            List<String> versionString = map.get(CLIENT_VERSION_REV);
+            if ((versionString != null) && (! versionString.isEmpty())) {
+                return OutputMessageParser.parseClientVersion(versionString.get(0));
+            }
+        }
+        catch (VcsException e) {
+            //
+        }
+        return ClientVersion.UNKNOWN;
+    }
+
+    public void move(P4File from, P4File to, P4Connection connection, boolean keepWorkspace, long changeList) throws VcsException {
+        CommandArguments command = CommandArguments.createOn(P4Command.move);
+        appendChangeListNumber(changeList, command);
+
+        if (keepWorkspace) {
+            command.append("-k");
+        }
+        command.append(from.getEscapedPath());
+        command.append(to.getEscapedPath());
+
+        ExecResult result = executeP4Command(command.getArguments(), connection);
+        checkError(result, connection);
+        if (result.getStdout().contains("can't move to an existing file")) {
+            throw new VcsException(PerforceLocalize.exceptionTextCannotAssureNoFileBeingOnServer(to.getLocalPath()).get());
+        }
+    }
+
+    public boolean isValidPendingNumber(P4Connection connection, long number) {
+        LOG.debug("connection = [" + connection + "], changeListNumber = [" + number + "]");
+        CommandArguments args = CommandArguments.createOn(P4Command.describe);
+        args.append("-s").append(number);
+        ExecResult execResult = executeP4Command(args.getArguments(), connection);
+        Throwable exception = execResult.getException();
+        boolean error = exception != null || containsErrorOutput(execResult) || execResult.getExitCode() < 0;
+        return !error;
+    }
+
+    public List<String> getBranchViews(String branchName, boolean target, P4Connection connection) throws VcsException {
+        List<String> fileSpecs = new ArrayList<>();
+        for (String view : loadBranchSpec(branchName, connection).getViews()) {
+            String[] split = view.split("\\s");
+            if (split.length == 2) {
+                fileSpecs.add(split[target ? 1 : 0]);
+            }
+        }
+        return fileSpecs;
+    }
+
+    private boolean isInsideBranch(String branchName, P4Connection connection, String depotPath) throws VcsException {
+        for (String view : getBranchViews(branchName, true, connection)) {
+            if (depotPath.startsWith(StringUtil.trimEnd(view, "..."))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void unshelve(P4Connection connection, long changeList, Collection<String> paths) throws VcsException {
+        ExecResult result = executeP4Command(new String[]{"unshelve", "-s", String.valueOf(changeList), "-c", String.valueOf(changeList)}, paths, null, new PerforceContext(connection));
+        checkError(result, connection);
+    }
+
+    public void shelve(P4Connection connection, long changeList, Collection<String> paths) throws VcsException {
+        ExecResult result = executeP4Command(new String[]{"shelve", "-f", "-c", String.valueOf(changeList)}, paths, null, new PerforceContext(connection));
+        if (result.getExitCode() != 0) {
+            throw new VcsException(result.getStdout() + result.getStderr());
+        }
+        checkError(result, connection);
+    }
+
+    public void deleteFromShelf(P4Connection connection, long changeList, Collection<String> paths) throws VcsException {
+        ExecResult result = executeP4Command(new String[]{"shelve", "-d", "-c", String.valueOf(changeList)}, paths, null, new PerforceContext(connection));
+        checkError(result, connection);
+        deleteChangeList(connection, changeList, false, true, true);
+    }
+}

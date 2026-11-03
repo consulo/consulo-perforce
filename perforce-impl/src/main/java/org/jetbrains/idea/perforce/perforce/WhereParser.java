@@ -1,0 +1,101 @@
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+
+package org.jetbrains.idea.perforce.perforce;
+
+import org.jspecify.annotations.Nullable;
+import consulo.platform.Platform;
+import consulo.versionControlSystem.VcsException;
+import consulo.perforce.localize.PerforceLocalize;
+
+import java.util.List;
+
+/**
+ * Note: the result could be like that:
+ * "//depot/p4Trunk/src/com/spaces here also/sss/a b.txt <no line break>
+ * //unit-206/p4Trunk/src/com/spaces here also_/sss/a b.txt <no line break>
+ * c:/depot3666/p4Trunk\src\com\spaces here also_\sss\a b.txt"
+ *
+ * so it is not that simple
+ */
+public class WhereParser {
+    private String myIn;
+    private final List<String> myClientRoots;
+    private final @Nullable String myClientName;
+    private final String myAnyPath;
+
+    private String myLocal = "";
+    private String myLocalRootRelative = "";
+    private String myDepot = "";
+
+    // client name case - can it be an issue?
+    WhereParser(String in, List<String> clientRoots, @Nullable String clientName, String anyPath) {
+        myIn = in;
+        myClientRoots = clientRoots;
+        myClientName = clientName;
+        myAnyPath = anyPath;
+    }
+
+    public void execute() throws VcsException {
+        String preparedAnyPath = myAnyPath.replace('\\', '/');
+        int lastIdx = preparedAnyPath.lastIndexOf('/');
+        preparedAnyPath = (lastIdx == -1) ? preparedAnyPath : preparedAnyPath.substring(lastIdx + 1);
+
+        myIn = myIn.replace('\\', '/');
+
+        int idxOfLocalRootRelative = myIn.indexOf(" //" + myClientName + "/");
+        if (idxOfLocalRootRelative == -1) {
+            throw new VcsException(createErrorMessage(preparedAnyPath));
+        }
+
+        int idxLocal = findRelativeEnd(idxOfLocalRootRelative + 1);
+        if ((idxLocal == -1) || (idxLocal <= idxOfLocalRootRelative)) {
+            throw new VcsException(createErrorMessage(preparedAnyPath));
+        }
+
+        myDepot = myIn.substring(0, idxOfLocalRootRelative).trim();
+        myLocalRootRelative = myIn.substring(idxOfLocalRootRelative, idxLocal).trim();
+        myLocal = myIn.substring(idxLocal).trim();
+    }
+
+    private int findRelativeEnd(int from) {
+        for (String root : myClientRoots) {
+            int index = myIn.indexOf(" " + root, from);
+            if (index >= 0) {
+                return index;
+            }
+        }
+
+        if (Platform.current().os().isWindows()) {
+            int colon = myIn.indexOf(":", from);
+            while (colon > from + 2) {
+                if (myIn.charAt(colon - 2) == ' ' &&
+                        Character.isLetter(myIn.charAt(colon - 1)) &&
+                        colon + 1 < myIn.length() &&
+                        (myIn.charAt(colon + 1) == '/' || myIn.charAt(colon + 1) == '\\')) {
+                    return colon - 2;
+                }
+                colon = myIn.indexOf(":", colon + 1);
+            }
+        }
+
+        return myIn.indexOf(" ", from);
+    }
+
+    public String getLocal() {
+        return myLocal;
+    }
+
+    public String getLocalRootRelative() {
+        return myLocalRootRelative;
+    }
+
+    public String getDepot() {
+        return myDepot;
+    }
+
+    private String createErrorMessage(String preparedAnyPath) {
+        String details = myIn + ", myAnyPath = '" + myAnyPath + "', anyPathFile = '" + preparedAnyPath + "', myClientName = '" +
+                              myClientName + "', myClientRoots = '" + myClientRoots + "'";
+        return PerforceLocalize.errorP4WhereWrongResult(details).get();
+    }
+}
