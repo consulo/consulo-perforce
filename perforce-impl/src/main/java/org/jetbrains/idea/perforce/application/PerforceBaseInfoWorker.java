@@ -1,0 +1,240 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the MIT license (see NOTICE.txt).
+package org.jetbrains.idea.perforce.application;
+
+import consulo.annotation.component.ComponentScope;
+import consulo.annotation.component.ServiceAPI;
+import consulo.annotation.component.ServiceImpl;
+import consulo.logging.Logger;
+import consulo.project.Project;
+import consulo.util.collection.ContainerUtil;
+import consulo.versionControlSystem.VcsException;
+import consulo.virtualFileSystem.VirtualFile;
+import jakarta.inject.Inject;
+import jakarta.inject.Singleton;
+import org.jetbrains.idea.perforce.perforce.PerforceAuthenticationException;
+import org.jetbrains.idea.perforce.perforce.PerforceRunner;
+import org.jetbrains.idea.perforce.perforce.PerforceSettings;
+import org.jetbrains.idea.perforce.perforce.connections.P4Connection;
+import org.jetbrains.idea.perforce.perforce.connections.PerforceConnectionManagerI;
+import org.jetbrains.idea.perforce.perforce.connections.PerforceConnectionProblemsNotifier;
+import org.jetbrains.idea.perforce.perforce.login.PerforceLoginManager;
+import org.jspecify.annotations.Nullable;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
+
+/**
+ * Either synchronous or queued
+ */
+@ServiceAPI(ComponentScope.PROJECT)
+@ServiceImpl
+@Singleton
+public final class PerforceBaseInfoWorker {
+  private static final Logger LOG = Logger.getInstance(PerforceBaseInfoWorker.class);
+
+  private long myLastValidTime = -1;
+  private final PerforceConnectionManagerI myConnectionManager;
+  private final PerforceSettings mySettings;
+  private PerforceClientRootsChecker myChecker = new PerforceClientRootsChecker();
+
+  /**
+   * Sometimes the cache is reset while a background thread still works with previous connections and
+   * wants to get their info. But if the connections have been recreated, the map won't contain old connections.
+   * In this case, 'p4 info' is run explicitly for the given connection and cached in this map. Since this
+   * "old" connection is unlikely to be needed after all current bg processes have finished, the map is weak.
+   */
+  private Map<P4Connection, ConnectionInfo> myInfos = new WeakHashMap<>();
+  private final Object myInfoLock = new Object();
+  private final Object myRefreshLock = new Object();
+  private boolean myIsDirty;
+  private boolean myStop;
+  private final PerforceConnectionProblemsNotifier myNotifier;
+  private final PerforceLoginManager myLoginManager;
+  // todo don't like it
+  private volatile boolean myInsideRefresh;
+
+  @Inject
+  public PerforceBaseInfoWorker(Project project) {
+    myNotifier = PerforceConnectionProblemsNotifier.getInstance(project);
+    myLoginManager = PerforceLoginManager.getInstance(project);
+    myLoginManager.addSuccessfulLoginListener(() -> {
+      synchronized (myInfoLock) {
+        if (myChecker.hasNotAuthorized()) {
+          scheduleRefresh();
+        }
+      }
+    });
+    myConnectionManager = project.getInstance(PerforceConnectionManagerI.class);
+    mySettings = PerforceSettings.getSettings(project);
+  }
+
+  private Map<P4Connection, ConnectionInfo> refreshInfo() {
+    if (! mySettings.ENABLED) {
+      return Collections.emptyMap();
+    }
+
+    Map<P4Connection, ConnectionInfo> old;
+    synchronized (myInfoLock) {
+      old = myInfos;
+      if (!myIsDirty) {
+        return old;
+      }
+    }
+
+    PerforceInfoAndClient.RefreshInfo refreshInfo;
+    synchronized (myRefreshLock) {
+      myInsideRefresh = true;
+      try {
+        refreshInfo = doRefreshInfo(old);
+      } finally {
+        myInsideRefresh = false;
+      }
+    }
+
+    return refreshInfo.newInfo;
+  }
+
+  private PerforceInfoAndClient.RefreshInfo doRefreshInfo(Map<P4Connection, ConnectionInfo> old) {
+    Map<VirtualFile, P4Connection> allConnections = myConnectionManager.getAllConnections();
+    PerforceInfoAndClient.RefreshInfo refreshInfo = recalculateInfo(allConnections, old);
+    PerforceClientRootsChecker checker = new PerforceClientRootsChecker(refreshInfo.newInfo, allConnections);
+
+    synchronized (myInfoLock) {
+      myIsDirty = false;
+      myInfos = new WeakHashMap<>();
+      myInfos.putAll(refreshInfo.newInfo);
+      myChecker = checker;
+      if (!refreshInfo.hasAnyErrorsBesidesAuthentication) {
+        myLastValidTime = System.currentTimeMillis();
+      }
+    }
+    LOG.debug("info+client calculated: " + refreshInfo);
+
+    notifyAboutErrors(checker, refreshInfo);
+    return refreshInfo;
+  }
+
+  private PerforceInfoAndClient.RefreshInfo recalculateInfo(Map<VirtualFile, P4Connection> allConnections, Map<P4Connection, ConnectionInfo> old) {
+    Project project = mySettings.getProject();
+    PerforceRunner runner = PerforceRunner.getInstance(project);
+    ClientRootsCache cache = ClientRootsCache.getClientRootsCache(project);
+    cache.putVcsRoots(ContainerUtil.map(allConnections.keySet(), VirtualFile::getPath));
+    return PerforceInfoAndClient.recalculateInfos(old, allConnections.values(), runner, cache);
+  }
+
+  private void notifyAboutErrors(PerforceClientRootsChecker checker, PerforceInfoAndClient.RefreshInfo refreshInfo) {
+    if (checker.isServerUnavailable()) {
+      myNotifier.setProblems(true, true);
+    } else {
+      myNotifier.setProblems(false, checker.hasAnyErrors() || refreshInfo.hasAnyErrorsBesidesAuthentication);
+    }
+    if (checker.hasNotAuthorized()) {
+      for (Map.Entry<P4Connection, PerforceAuthenticationException> connection : checker.getNotAuthorized().entrySet()) {
+        myLoginManager.getNotifier().ensureNotify(connection.getKey(), connection.getValue());
+      }
+    }
+  }
+
+  public void scheduleRefresh() {
+    if (myInsideRefresh) {
+      return;
+    }
+    LOG.debug("Schedule refresh: ", new Throwable());
+    synchronized (myInfoLock) {
+      myLastValidTime = -1;
+      myIsDirty = true;
+    }
+  }
+
+  public @Nullable Map<String, List<String>> getInfo(@Nullable P4Connection connection) throws VcsException {
+    ConnectionInfo info = getInfoAndClient(connection);
+    return info == null ? null : info.getInfo();
+  }
+
+  public @Nullable ClientData getClient(@Nullable P4Connection connection) throws VcsException {
+    ConnectionInfo info = getInfoAndClient(connection);
+    return info == null ? null : info.getClient();
+  }
+
+  public @Nullable Map<String, List<String>> getCachedInfo(@Nullable P4Connection connection) throws VcsException {
+    synchronized (myInfoLock) {
+      if (myStop) {
+        return null;
+      }
+      ConnectionInfo info = connection == null ? null : myInfos.get(connection);
+      if (info == null) {
+        LOG.debug("No info for " + connection + "; infos=" + myInfos);
+        return null;
+      }
+      return info.getInfo();
+    }
+  }
+
+  public @Nullable ClientData getCachedClient(@Nullable P4Connection connection) throws VcsException {
+    synchronized (myInfoLock) {
+      if (myStop) {
+        return null;
+      }
+      ConnectionInfo info = connection == null ? null : myInfos.get(connection);
+      return info == null ? null : info.getClient();
+    }
+  }
+
+  private @Nullable ConnectionInfo getInfoAndClient(@Nullable P4Connection connection) throws VcsException {
+    ConnectionInfo info;
+    boolean dirty;
+    synchronized (myInfoLock) {
+      if (myStop) {
+        return null;
+      }
+
+      info = connection == null ? null : myInfos.get(connection);
+      dirty = myIsDirty;
+      if (!dirty && info != null) {
+        return info;
+      }
+    }
+
+    if (dirty) {
+      info = refreshInfo().get(connection);
+    }
+    if (info == null && connection != null) {
+      Project project = mySettings.getProject();
+      info = PerforceInfoAndClient.calcInfo(connection, PerforceRunner.getInstance(project), ClientRootsCache.getClientRootsCache(project));
+      synchronized (myInfoLock) {
+        myInfos.put(connection, info);
+      }
+    }
+
+    return info;
+  }
+
+  public void stop() {
+    LOG.debug("stop", new Throwable());
+    synchronized (myInfoLock) {
+      myStop = true;
+    }
+  }
+
+  public void start() {
+    LOG.debug("start", new Throwable());
+    synchronized (myInfoLock) {
+      myStop = false;
+      myLastValidTime = -1;
+    }
+  }
+
+  public long getLastValidTime() {
+    synchronized (myInfoLock) {
+      return myLastValidTime;
+    }
+  }
+
+  public P4RootsInformation getCheckerResults() {
+    synchronized (myInfoLock) {
+      return new P4RootsInformationHolder(myChecker.getErrors(), myChecker.getMap(), myChecker.getNotAuthorized(), myChecker.hasNoConnections());
+    }
+  }
+}

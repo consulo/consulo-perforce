@@ -1,0 +1,180 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the MIT license (see NOTICE.txt).
+package org.jetbrains.idea.perforce.perforce.connections;
+
+import consulo.annotation.component.ComponentScope;
+import consulo.annotation.component.ServiceAPI;
+import consulo.annotation.component.ServiceImpl;
+import consulo.logging.Logger;
+import consulo.project.Project;
+import consulo.versionControlSystem.ProjectLevelVcsManager;
+import consulo.virtualFileSystem.VirtualFile;
+import consulo.process.local.EnvironmentUtil;
+import consulo.util.lang.SystemProperties;
+import jakarta.inject.Inject;
+import jakarta.inject.Singleton;
+import org.jspecify.annotations.Nullable;
+import org.jetbrains.idea.perforce.application.PerforceVcs;
+import org.jetbrains.idea.perforce.perforce.PerforcePhysicalConnectionParametersI;
+import org.jetbrains.idea.perforce.perforce.PerforceSettings;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@ServiceAPI(ComponentScope.PROJECT)
+@ServiceImpl
+@Singleton
+public final class P4EnvHelper {
+    public static final Class<P4EnvListener> P4_ENV_CHANGED = P4EnvListener.class;
+
+    private static final Logger LOG = Logger.getInstance(P4EnvHelper.class);
+    private static final List<String> ENV_CONFIGS = List.of(P4ConfigFields.P4PORT.getName(), P4ConfigFields.P4CLIENT.getName(),
+                                                            P4ConfigFields.P4USER.getName(), P4ConfigFields.P4PASSWD.getName(),
+                                                            P4ConfigFields.P4CONFIG.getName(), P4ConfigFields.P4IGNORE.getName());
+    private final Project myProject;
+
+    @Inject
+    public P4EnvHelper(Project project) {
+        myProject = project;
+        reset();
+    }
+
+    public P4ConnectionParameters getDefaultParams() {
+        return myDefaultParams;
+    }
+
+    public static P4EnvHelper getConfigHelper(Project project) {
+        return project.getInstance(P4EnvHelper.class);
+    }
+
+    public void reset() {
+        PerforceSettings settings = PerforceSettings.getSettings(myProject);
+        initializeP4SetVariables(myProject, settings.getPhysicalSettings(false));
+        settings.setEnvP4IgnoreVar(getP4Ignore());
+    }
+
+    private final Map<String, String> myDefaultParamsMap = new HashMap<>();
+    private P4ConnectionParameters myDefaultParams = new P4ConnectionParameters();
+
+    private void initializeP4SetVariables(Project project, PerforcePhysicalConnectionParametersI physicalParameters) {
+        ProjectLevelVcsManager vcsManager = ProjectLevelVcsManager.getInstance(myProject);
+        PerforceVcs vcs = PerforceVcs.getInstance(myProject);
+        VirtualFile[] detailedVcsMappings = vcsManager.getRootsUnderVcs(vcs);
+        P4ParamsCalculator calculator = new P4ParamsCalculator(project);
+
+        Map<String, String> oldMap;
+        synchronized (this) {
+            oldMap = new HashMap<>(myDefaultParamsMap);
+        }
+
+        P4ConnectionParameters newDefaultParams = new P4ConnectionParameters();
+        P4ConnectionParameters params = calculator.runSetOnFile(physicalParameters, newDefaultParams, SystemProperties.getUserHome());
+        takeProblemsIntoDefaultParams(params, newDefaultParams);
+        for (VirtualFile vcsMapping : detailedVcsMappings) {
+            P4ConnectionParameters mappingParams = calculator.runSetOnFile(physicalParameters, newDefaultParams, vcsMapping.getPath());
+            takeProblemsIntoDefaultParams(mappingParams, newDefaultParams);
+            if (newDefaultParams.allFieldsDefined()) {
+                break;
+            }
+        }
+
+        synchronized (this) {
+            myDefaultParamsMap.clear();
+            myDefaultParams = newDefaultParams;
+
+            for (String envVar : ENV_CONFIGS) {
+                String value = EnvironmentUtil.getValue(envVar);
+                tryToPutVariable(envVar, value);
+            }
+
+            tryToPutVariable(P4ConfigFields.P4PORT.getName(), myDefaultParams.getServer());
+            tryToPutVariable(P4ConfigFields.P4USER.getName(), myDefaultParams.getUser());
+            tryToPutVariable(P4ConfigFields.P4CLIENT.getName(), myDefaultParams.getClient());
+            tryToPutVariable(P4ConfigFields.P4PASSWD.getName(), myDefaultParams.getPassword());
+            tryToPutVariable(P4ConfigFields.P4CONFIG.getName(), myDefaultParams.getConfigFileName());
+            tryToPutVariable(P4ConfigFields.P4IGNORE.getName(), myDefaultParams.getIgnoreFileName());
+            tryToPutVariable(P4ConfigFields.P4CHARSET.getName(), myDefaultParams.getCharset());
+
+            if (!oldMap.isEmpty() && !myDefaultParamsMap.equals(oldMap)) {
+                LOG.info("Environment has changed: was %s now %s".formatted(oldMap.toString(), myDefaultParamsMap.toString()));
+                if (!myProject.isDisposed()) {
+                    myProject.getMessageBus().syncPublisher(P4_ENV_CHANGED).environmentChanged();
+                }
+            }
+        }
+    }
+
+    private void tryToPutVariable(String variable, @Nullable String value) {
+        if (value != null) {
+            myDefaultParamsMap.put(variable, value);
+        }
+    }
+
+    private static void takeProblemsIntoDefaultParams(P4ConnectionParameters params, P4ConnectionParameters defaultParameters) {
+        if (params.hasProblems()) {
+            Throwable exception = params.getException();
+            if (exception != null) {
+                defaultParameters.setException(exception);
+            }
+            if (! params.getWarnings().isEmpty()) {
+                for (String warning : params.getWarnings()) {
+                    defaultParameters.addWarning(warning);
+                }
+            }
+        }
+    }
+
+    public synchronized String getUnsetP4EnvironmentVars() {
+        return ENV_CONFIGS.stream()
+          .filter(env -> myDefaultParamsMap.get(env) == null)
+          .collect(Collectors.joining(","));
+    }
+
+    public synchronized boolean hasP4ConfigSetting() {
+        return myDefaultParamsMap.get(P4ConfigFields.P4CONFIG.getName()) != null;
+    }
+
+    public synchronized boolean hasP4IgnoreSetting() {
+        return myDefaultParamsMap.get(P4ConfigFields.P4IGNORE.getName()) != null;
+    }
+
+    public synchronized @Nullable String getP4Config() {
+        return myDefaultParamsMap.get(P4ConfigFields.P4CONFIG.getName());
+    }
+
+    public synchronized @Nullable String getP4Ignore() {
+        return myDefaultParamsMap.get(P4ConfigFields.P4IGNORE.getName());
+    }
+
+    public synchronized void fillDefaultValues(P4ConnectionParameters parameters) {
+        if (parameters.getServer() == null) {
+            parameters.setServer(myDefaultParamsMap.get(P4ConfigFields.P4PORT.getName()));
+        }
+        if (parameters.getUser() == null) {
+            parameters.setUser(myDefaultParamsMap.get(P4ConfigFields.P4USER.getName()));
+        }
+        if (parameters.getClient() == null) {
+            parameters.setClient(myDefaultParamsMap.get(P4ConfigFields.P4CLIENT.getName()));
+        }
+        if (parameters.getPassword() == null) {
+            parameters.setPassword(myDefaultParamsMap.get(P4ConfigFields.P4PASSWD.getName()));
+        }
+        if (parameters.getIgnoreFileName() == null) {
+            parameters.setIgnoreFileName(myDefaultParams.getIgnoreFileName());
+        }
+    }
+
+    public static @Nullable String getP4IgnoreFileNameFromEnv() {
+        String testValue = AbstractP4Connection.getTestEnvironment().get(P4ConfigFields.P4IGNORE.getName());
+        if (testValue != null) {
+            return testValue;
+        }
+
+        return EnvironmentUtil.getValue(P4ConfigFields.P4IGNORE.getName());
+    }
+
+    public static boolean hasP4ConfigSettingInEnvironment() {
+        return EnvironmentUtil.getValue(P4ConfigFields.P4CONFIG.getName()) != null;
+    }
+}

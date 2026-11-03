@@ -1,0 +1,33 @@
+This plugin is ported from the Perforce integration in JetBrains intellij-plugins
+(https://github.com/JetBrains/intellij-plugins/tree/master/PerforceIntegration).
+Copyright 2000-2026 JetBrains s.r.o. and contributors.
+
+The PerforceIntegration directory is distributed under the MIT license (its LICENSE.txt, reproduced below); some of its
+source files carry an Apache License 2.0 header. The Consulo-specific code of this repository is distributed under the
+Apache License 2.0 (LICENSE.txt).
+
+Ported parts: the p4 command runner and output parsers, connections (settings, P4CONFIG, environment, P4V client
+configuration), login and tickets, change lists and the change provider, checkout on edit, add/delete/move operations,
+submit, revert, sync/update, integrate, shelve, history, annotate, diff, merge/resolve, jobs, the configurable, actions,
+the localized messages and the plugin icon (converted from Kotlin to Java), and the unit tests that run without a
+Perforce server.
+
+---- PerforceIntegration/LICENSE.txt ----
+
+Copyright 2020-2021, Jetbrains s.r.o
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+and associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+https://opensource.org/licenses/MIT

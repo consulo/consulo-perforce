@@ -1,0 +1,127 @@
+/*
+ * Copyright 2000-2005 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.jetbrains.idea.perforce.actions;
+
+import consulo.annotation.component.ActionImpl;
+import consulo.perforce.localize.PerforceLocalize;
+import consulo.project.Project;
+import consulo.ui.annotation.RequiredUIAccess;
+import consulo.ui.ex.action.AnActionEvent;
+import consulo.ui.ex.action.AnActionWithSyncUpdate;
+import consulo.ui.ex.action.DumbAwareAction;
+import consulo.ui.ex.action.Presentation;
+import consulo.ui.ex.awt.Messages;
+import consulo.util.lang.Pair;
+import consulo.versionControlSystem.AbstractVcs;
+import consulo.versionControlSystem.ProjectLevelVcsManager;
+import consulo.versionControlSystem.VcsException;
+import consulo.versionControlSystem.util.VcsUtil;
+import consulo.virtualFileSystem.VirtualFile;
+import org.jetbrains.idea.perforce.application.PerforceVcs;
+import org.jetbrains.idea.perforce.merge.PerforceMergeProvider;
+import org.jetbrains.idea.perforce.perforce.PerforceRunner;
+import org.jetbrains.idea.perforce.perforce.PerforceSettings;
+import org.jetbrains.idea.perforce.perforce.connections.P4Connection;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
+@ActionImpl(id = "ResolveAll")
+public class ResolveAllAction extends DumbAwareAction implements AnActionWithSyncUpdate {
+    public ResolveAllAction() {
+        super(PerforceLocalize.actionResolveallText());
+    }
+
+    @Override
+    public void update(AnActionEvent e) {
+        Presentation presentation = e.getPresentation();
+
+        Project project = e.getData(Project.KEY);
+        if (project == null) {
+            presentation.setEnabledAndVisible(false);
+            return;
+        }
+
+        AbstractVcs[] allActiveVcss = ProjectLevelVcsManager.getInstance(project).getAllActiveVcss();
+        boolean found = false;
+        for (AbstractVcs vcs : allActiveVcss) {
+            if (PerforceVcs.NAME.equals(vcs.getName())) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            presentation.setEnabledAndVisible(false);
+            return;
+        }
+
+        PerforceSettings settings = PerforceSettings.getSettings(project);
+        if (!settings.ENABLED) {
+            presentation.setEnabled(false);
+            presentation.setVisible(true);
+            return;
+        }
+
+        presentation.setEnabledAndVisible(true);
+    }
+
+    @Override
+    @RequiredUIAccess
+    public void actionPerformed(AnActionEvent e) {
+        Project project = e.getData(Project.KEY);
+        if (project == null) {
+            return;
+        }
+
+        PerforceSettings settings = PerforceSettings.getSettings(project);
+        if (!ResolveAction.serverSupportsConflictsResolve(settings, settings.getAllConnections())) {
+            Messages.showErrorDialog(project, PerforceLocalize.messageServerCantResolveConflicts().get(),
+                PerforceLocalize.messageTitleResolve().get());
+            return;
+        }
+
+        try {
+            List<VirtualFile> filesToResolveUnderProject = new ArrayList<>();
+            PerforceVcs vcs = PerforceVcs.getInstance(project);
+            PerforceRunner runner = PerforceRunner.getInstance(project);
+            ProjectLevelVcsManager vcsManager = ProjectLevelVcsManager.getInstance(project);
+
+            VcsUtil.runVcsProcessWithProgress(() -> {
+                Collection<Pair<P4Connection, Collection<VirtualFile>>> rootsByConnections = vcs.getRootsByConnections();
+                for (Pair<P4Connection, Collection<VirtualFile>> pair : rootsByConnections) {
+                    for (VirtualFile root : pair.getSecond()) {
+                        for (VirtualFile file : runner.getResolvedWithConflicts(pair.getFirst(), root)) {
+                            if (vcsManager.getVcsFor(file) == vcs) {
+                                filesToResolveUnderProject.add(file);
+                            }
+                        }
+                    }
+                }
+            }, PerforceLocalize.messageSearchingForFilesToResolve().get(), false, project);
+            if (filesToResolveUnderProject.isEmpty()) {
+                Messages.showInfoMessage(PerforceLocalize.messageTextNoFilesToResolve().get(),
+                    PerforceLocalize.messageTitleResolve().get());
+            }
+            else {
+                new PerforceMergeProvider(project).showMergeDialog(filesToResolveUnderProject);
+            }
+        }
+        catch (VcsException e1) {
+            Messages.showErrorDialog(e1.getLocalizedMessage(), PerforceLocalize.messageTitleResolve().get());
+        }
+    }
+}

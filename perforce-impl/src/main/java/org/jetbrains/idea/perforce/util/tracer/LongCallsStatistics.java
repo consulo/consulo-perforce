@@ -1,0 +1,108 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the MIT license (see NOTICE.txt).
+package org.jetbrains.idea.perforce.util.tracer;
+
+import java.util.function.Consumer;
+import org.jspecify.annotations.Nullable;
+
+import java.util.SortedMap;
+import java.util.TreeMap;
+
+final class LongCallsStatistics<Kind extends Enum>
+  extends IntervalStatistics<LongCallsStatistics.Data<Kind>, LongCallsStatistics.IntervalData<Kind>, LongCallsStatistics.AverageData<Kind>> implements Tracer<Kind, Long> {
+
+    private static final int ourDefaultMaxKept = 20;
+    private static final long ourDefaultLowerBound = 1000;
+    private final long myLowerBound;
+
+    LongCallsStatistics(long intervalInMillis, int historyQueueSize, @Nullable Runnable switchListener, int maxKept, long lowerBound) {
+        super(intervalInMillis, historyQueueSize, () -> new IntervalData<>(maxKept <= 0 ? ourDefaultMaxKept : maxKept), () -> new AverageData<>(
+          maxKept <= 0 ? ourDefaultMaxKept : maxKept), switchListener);
+        myLowerBound = lowerBound < 0 ? ourDefaultLowerBound : lowerBound;
+    }
+
+    @Override
+    public Long start(Kind kind, String presentation) {
+        return System.currentTimeMillis();
+    }
+
+    @Override
+    public void stop(Long key, Kind kind, String presentation) {
+        long interval = System.currentTimeMillis() - key;
+        if (interval < myLowerBound) {
+            return;
+        }
+
+        step(new Data<>(presentation, interval));
+    }
+
+    static class MyMapHolder<Kind> {
+        private final int myMaxKept;
+        private final SortedMap<Long, Data<Kind>> myMap;
+
+        MyMapHolder(int maxKept) {
+            myMaxKept = maxKept;
+            myMap = new TreeMap<>();
+        }
+
+        public void accept(Data<Kind> kindData) {
+            long interval = kindData.getInterval();
+
+            if ((! myMap.isEmpty()) && (myMap.firstKey() > interval)) {
+                return;
+            }
+            if (myMap.size() == myMaxKept) {
+                myMap.remove(myMap.firstKey());
+            }
+            myMap.put(interval, kindData);
+        }
+
+        public SortedMap<Long, Data<Kind>> getMap() {
+            return myMap;
+        }
+    }
+
+    static final class IntervalData<Kind> extends MyMapHolder<Kind> implements Consumer<Data<Kind>> {
+        IntervalData(int maxKept) {
+            super(maxKept);
+        }
+    }
+
+    static final class AverageData<Kind> extends MyMapHolder<Kind> implements Consumer<IntervalData<Kind>> {
+        AverageData(int maxKept) {
+            super(maxKept);
+        }
+
+        @Override
+        public void accept(IntervalData<Kind> kindIntervalData) {
+            SortedMap<Long, Data<Kind>> map = kindIntervalData.getMap();
+            for (Data<Kind> kindData : map.values()) {
+                accept(kindData);
+            }
+        }
+    }
+
+    static final class Data<Kind> {
+        // todo +-
+        private final Throwable myStackTraceHolder;
+        private final String myPresentation;
+        private final long myInterval;
+
+        Data(String presentation, long interval) {
+            myPresentation = presentation;
+            myInterval = interval;
+            myStackTraceHolder = new Throwable();
+        }
+
+        public Throwable getStackTraceHolder() {
+            return myStackTraceHolder;
+        }
+
+        public String getPresentation() {
+            return myPresentation;
+        }
+
+        public long getInterval() {
+            return myInterval;
+        }
+    }
+}

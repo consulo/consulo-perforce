@@ -1,0 +1,45 @@
+<!--
+  - Copyright 2013-2026 consulo.io
+  -
+  - Licensed under the Apache License, Version 2.0 (the "License");
+  - you may not use this file except in compliance with the License.
+  - You may obtain a copy of the License at
+  -
+  - http://www.apache.org/licenses/LICENSE-2.0
+  -
+  - Unless required by applicable law or agreed to in writing, software
+  - distributed under the License is distributed on an "AS IS" BASIS,
+  - WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  - See the License for the specific language governing permissions and
+  - limitations under the License.
+  -->
+<consulo-plugin url="https://github.com/consulo/consulo-perforce">
+    <id>consulo.perforce</id>
+    <name>Perforce P4 (Helix Core)</name>
+    <version>SNAPSHOT</version>
+    <vendor>consulo.io</vendor>
+    <category>VCS Integration</category>
+    <localize>consulo.perforce.PerforceLocalize</localize>
+    <description>
+        <![CDATA[
+        Allows working with the <a href="https://www.perforce.com/products/helix-core">Perforce P4 version control system</a>
+        through the p4 command-line client:
+        <ul>
+        <li>Submit, merge, diff, shelve and more</li>
+        <li>Automatic checkout of files on editing</li>
+        <li>Dedicated item in the VCS menu and in the context menu</li>
+        </ul>
+        <p>To configure, open <b>Settings</b> and go to <b>Version Control | Perforce</b>.</p>
+        ]]>
+    </description>
+    <tags>
+        <tag>vcs</tag>
+    </tags>
+
+    <actions>
+        <!-- the action itself is registered by @ActionImpl; this only adds its default shortcut -->
+        <action id="PerforceDirect.Edit" class="org.jetbrains.idea.perforce.actions.ActionEdit">
+            <keyboard-shortcut first-keystroke="control alt E" keymap="$default"/>
+        </action>
+    </actions>
+</consulo-plugin>

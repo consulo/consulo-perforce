@@ -1,0 +1,848 @@
+action.Perforce.Force.Refresh.text:
+    text: Force Refresh
+action.Perforce.Shelve.text:
+    text: Shelve in Perforce...
+action.Perforce.SyncToRevision.text:
+    text: Sync to This Revision
+action.Perforce.Toolbar.PerforceToolbarWidgetAction.text:
+    text: Perforce
+action.Perforce.Toolbar.ShowMoreActions.text:
+    text: Version Control
+action.Perforce.Toolbar.WorkspaceAction.description:
+    text: Perforce Workspace
+action.Perforce.Toolbar.WorkspaceAction.description.template:
+    text: 'Perforce workspace: {0}'
+action.Perforce.Toolbar.WorkspaceAction.text:
+    text: Perforce Workspace
+action.Perforce.Toolbar.multiple.workspaces:
+    text: Multiple Workspaces
+action.Perforce.Toolbar.multiple.workspaces.description:
+    text: Multiple workspaces detected. Click to see all
+action.Perforce.Toolbar.workspaces.label:
+    text: Workspace
+action.Perforce.Unshelve.And.Delete.description:
+    text: Unshelve selected changes to the default changelist and delete them from the shelf
+action.Perforce.Unshelve.And.Delete.text:
+    text: Unshelve and Delete
+action.Perforce.Unshelve.description:
+    text: Unshelve selected changes to the default changelist
+action.Perforce.Unshelve.text:
+    text: Unshelve
+action.PerforceCheckLoginStateAction.text:
+    text: Check Login State
+action.PerforceCommittedChanges.Filter.description:
+    text: Change filtering criteria
+action.PerforceCommittedChanges.Filter.text:
+    text: Filter
+action.PerforceDirect.Edit.description:
+    text: Checkout the file or dir from Perforce
+action.PerforceDirect.Edit.text:
+    text: _Edit
+action.PerforceEnableIntegration.description:
+    text: Toggle between offline and online mode
+action.PerforceEnableIntegration.text:
+    text: Work Offline
+action.Resolve.text:
+    text: Re_solve...
+action.ResolveAll.text:
+    text: Resolve A_ll
+action.RevertUnchanged.text:
+    text: Rever_t Unchanged Files
+action.RevisionGraph.text:
+    text: Revision Graph...
+action.SetJobsForChangeList.text:
+    text: Set jobs for changelist
+action.TimeLapseView.text:
+    text: Time-lapse View...
+action.gooffline.text:
+    text: Go offline
+action.inspect.text:
+    text: Inspect
+action.link.changelist.to.jobs:
+    text: Edit Associated Jobs
+action.name.show.branches:
+    text: Show Branches
+action.retry.text:
+    text: Retry
+action.text.show.all.submitted:
+    text: Show All Revisions Submitted In Selected Changelist
+activity.opening.file:
+    text: Opening file {0} for edit
+activity.opening.file.for.edit:
+    text: Opening files for edit
+activity.performing:
+    text: Performing Perforce activity…
+activity.retrieving.file.info:
+    text: Retrieving file {0} info
+activity.reverting.file:
+    text: Reverting file {0} for edit
+activity.sync.view:
+    text: Synchronizing Perforce view
+add.select.files:
+    text: Select Files to Add to Perforce
+border.configure.ignore.settings:
+    text: Ignore Settings
+border.configure.ignore.settings.disabled:
+    text: Ignore Settings (Set in P4CONFIG)
+border.configure.perforce.config.settings:
+    text: Config Settings
+button.text.cancel.rest:
+    text: '&Cancel Rest'
+button.text.new:
+    text: '&New...'
+button.text.resent.and.disable.integration:
+    text: Work &Offline
+button.text.test.connection:
+    text: '&Test Connection'
+button.text.wait.more:
+    text: '&Wait More'
+cannot.load.branch.spec.description.error.text:
+    text: 'Cannot load branch spec description: {0}'
+change.list.decoration:
+    text: ' - Perforce #{0}'
+change.list.decoration.suffix:
+    text: ; {0} shelved {0, choice, 0#change|2#changes}
+changelist.create.error:
+    text: P4 changelist create error
+changelist.delete.error:
+    text: P4 changelist delete error
+changelist.has.shelved.changes:
+    text: The changelist "{0}" has shelved changes in Perforce.
+changelist.moving.to.another:
+    text: Moving files to another changelist in Perforce…
+changelist.remove.shelved.changes:
+    text: '&Remove Shelved Changes'
+changelist.rename.error:
+    text: P4 changelist rename error
+changelist.shelved.changes.delete:
+    text: |-
+        The changelist "{0}" has shelved changes in Perforce.
+        Do you want to delete the changelist together with shelved changes?
+changelist.shelved.changes.found:
+    text: Shelved Changes Found
+changes.browser.changelist.term:
+    text: Changelist
+changes.browser.client.column.name:
+    text: Client
+checkbox.configure.ignore.use.p4ignore:
+    text: Use P4IGNORE environment variable
+checkbox.configure.perforce.is.enabled:
+    text: Perforce is online
+checkbox.configure.perforce.log.commands:
+    text: Dump Perforce Commands
+checkbox.configure.perforce.log.commands.output:
+    text: 'Log File:'
+checkbox.configure.perforce.show.branching.history:
+    text: Show branching history (for "File History" action, "Compare With..." list)
+checkbox.configure.perforce.show.integrated.changelists:
+    text: Show integrated changelists in committed changes
+checkbox.configure.perforce.use.login.authentication:
+    text: Use login authentication
+checkbox.configure.perforce.use.p4config:
+    text: Use environment values
+checkbox.configure.perforce.use.p4config.tooltip:
+    text: Environment values can be P4CONFIG or P4USER, P4PASSWD, P4PORT, P4CLIENT
+checkbox.do.force.sync:
+    text: Force sync (-f)
+checkbox.revert.files.after.shelf:
+    text: Revert checked out files after they are shelved
+checkbox.run.resolve.after.sync:
+    text: Run resolve automatically after the sync (p4 resolve -am)
+checkbox.switch.offline:
+    text: Switch to offline mode automatically if Perforce is unavailable
+checkbox.toggle.perforce.log.commands:
+    text: Dump Perforce Commands to Log
+checkbox.update.options.revert.unchanged.files.before.sync:
+    text: Revert unchanged files before sync (p4 revert -a)
+checkout.button.sync:
+    text: Sync
+checkout.client.label:
+    text: 'Workspace (Client):'
+checkout.directory.chooser.title:
+    text: Select Destination Directory
+checkout.directory.label:
+    text: 'Directory:'
+checkout.password.label:
+    text: 'Password:'
+checkout.progress.cancel:
+    text: Cancel Perforce Sync
+checkout.progress.syncing:
+    text: Syncing files to {0}
+checkout.progress.title:
+    text: Perforce sync
+checkout.server.label:
+    text: 'Server (Port):'
+checkout.stop.description:
+    text: Stop syncing from {0}?
+checkout.stop.title:
+    text: Stop Perforce Sync
+checkout.task.canceled:
+    text: Perforce checkout canceled
+checkout.task.failed:
+    text: Perforce checkout failed
+checkout.task.title:
+    text: Perforce Checkout
+checkout.task.tooltip:
+    text: Checkout from Perforce server
+checkout.test.connection:
+    text: Test Connection
+checkout.test.connection.fill.fields:
+    text: Server and user fields are not set
+checkout.test.connection.title:
+    text: Perforce Connection Test
+checkout.user.label:
+    text: 'User:'
+checkout.validation.client.empty:
+    text: Workspace name is required
+checkout.validation.directory.empty:
+    text: Destination directory is required
+checkout.validation.directory.not.dir:
+    text: Destination path is not a directory
+checkout.validation.directory.not.exist:
+    text: 'Destination directory does not exist: {0}'
+checkout.validation.server.empty:
+    text: Server address is required
+checkout.validation.user.empty:
+    text: User name is required
+combobox.configure.perforce.charset:
+    text: 'Charset:'
+config.actual.root:
+    text: 'Actual root:'
+config.client.roots:
+    text: 'Client roots:'
+config.dialog.title:
+    text: Perforce Configuration State
+config.file:
+    text: 'P4CONFIG file: {0}'
+config.refresh:
+    text: Refresh Perforce configuration state
+config.wrong.client.spec:
+    text: 'Wrong client specification:'
+configurable.JobsMasterDetails.display.name:
+    text: Perforce Jobs
+configurable.title.perforce.sync.settings:
+    text: Perforce Sync Settings
+configure.integrate.branch.spec.description.part.created.by:
+    text: created by {0}
+configure.integrate.branch.spec.title:
+    text: Branch Spec
+configure.integrate.branchspec.none.selected:
+    text: No branchspec selected for integrate
+configure.integrate.integrate.change.list.label:
+    text: Integrate changelist
+configure.integrate.reverse.checkbox:
+    text: Reverse
+configure.integrate.store.changes.to.change.list.group.title:
+    text: Store Changes To Changelist
+configure.perforce.timeout.seconds:
+    text: seconds
+confirmation.text.add.files:
+    text: |-
+        Do you want to add the following file to Perforce
+        {0}
+
+        If you choose Cancel you can still add it later manually.
+        (If the file was copied and you want to preserve its history
+        you may want to branch it manually in P4V)
+confirmation.text.auto.edit.file.not.registered.on.server:
+    text: |-
+        File not registered on server: {0}
+        (To make it read/write just click the lock icon in the status bar)
+confirmation.text.file.marked.for.deletion.revert.and.replace:
+    text: 'File marked for DELETION: {0} as {1} Do you want to revert and replace it with this new version? (You should perhaps look and diff with the revisions)'
+confirmation.text.file.not.under.any.clientspec.continue.checkout:
+    text: 'File not under any clientspec: {0} Continue checkout?'
+confirmation.text.file.registered.as.only.on.server.replace.it:
+    text: 'File registered as only on server: {0} as {1} Do you want to replace it with this new local file? (You should perhaps look and diff with the revisions)'
+confirmation.text.open.files.for.edit:
+    text: Would you like to open files for edit?
+confirmation.text.password.not.allowed.enable.login:
+    text: Password not allowed at this server security level. Do you want to enable 'Login' option?
+confirmation.text.perforce.server.not.responding.disable.integration:
+    text: Perforce server is not responding. Do you want to disable Perforce integration?
+confirmation.text.remove.files:
+    text: |-
+        Do you want to auto-remove the following file?
+        {0}
+
+        If you choose No you can still remove it later manually
+confirmation.title.add.files:
+    text: 'P4: auto-add files confirm'
+confirmation.title.file.already.in.perforce:
+    text: 'P4: Replace existing file in P4?'
+confirmation.title.remove.files:
+    text: 'P4: auto-remove files confirm'
+connection.cancelled:
+    text: Connection canceled
+connection.cannot.connect:
+    text: Cannot Connect to Perforce Server
+connection.cannot.connect.click.to.go.online:
+    text: Click to go online
+connection.cannot.create:
+    text: Cannot create connection
+connection.cannot.determine.settings:
+    text: Cannot determine Perforce connection settings
+connection.config.file:
+    text: 'Config file names used: {0}'
+connection.env:
+    text: 'Environment: P4CONFIG = {0}'
+connection.error.notification:
+    text: "Cannot connect to Perforce at {0} \n<a href=\"{1}\">Enable login authentication</a>\n<a href=\"{2}\">Inspect</a> connection state"
+connection.go.offline:
+    text: Go &offline
+connection.go.online:
+    text: Go online
+connection.going.online:
+    text: 'Perforce: going online'
+connection.no.config.file:
+    text: No config file
+connection.no.params:
+    text: No parameters found
+connection.no.valid.connections:
+    text: No valid Perforce connections found, please check your VCS root configuration and connection settings
+connection.no.valid.connections.short:
+    text: No Perforce Connections
+connection.not.connected:
+    text: Not connected
+connection.not.logged.in:
+    text: Not logged to Perforce.
+connection.offline:
+    text: Perforce is offline.
+connection.offline.go.online:
+    text: |-
+        Perforce is offline. {0} is not possible in this state.
+        Go online?
+connection.offline.title:
+    text: Perforce Is Offline
+connection.params:
+    text: 'Use connection parameters:'
+connection.password.not.allowed:
+    text: |-
+        Perforce: Connection error.
+        Password not allowed at this server security level.
+        Please remove P4PASSWD field from your P4CONFIG file. Working directory: {0}
+connection.problem:
+    text: Connection Problem
+connection.problems:
+    text: Perforce connection problems
+connection.problems.message:
+    text: 'Connection problems:'
+connection.problems.title:
+    text: Perforce Connection Problems
+connection.refresh.state:
+    text: 'Perforce: refresh  connection state'
+connection.select.title:
+    text: Please Select a Connection
+connection.server.not.available:
+    text: Server is not available.
+connection.server.not.available.inspect:
+    text: Configuration problem.
+connection.state.title:
+    text: Perforce Connection State
+connection.status.offline:
+    text: Offline
+connection.successful:
+    text: Connection successful
+connection.test:
+    text: Test Connection
+connection.verifying:
+    text: Verifying Perforce connection
+connection.work.offline:
+    text: You can continue working and <a href="">go online</a> when the server is available
+default.changelist.presentation:
+    text: <Default>
+delete.select.files:
+    text: Select Files to Delete from Perforce
+dialog.description.path.to.p4.exe:
+    text: Select path to p4 executable
+dialog.description.path.to.p4.ignore:
+    text: Select path to p4 ignore file
+dialog.description.path.to.p4vc.exe:
+    text: Select path to p4vc executable
+dialog.message.invalid.perforce.executable.name:
+    text: |-
+        Invalid Perforce executable name
+        {0}
+dialog.title.link.job.to.changelist:
+    text: Link Job to Changelist
+dialog.title.path.to.p4.exe:
+    text: P4 Configuration
+dialog.title.path.to.p4.ignore:
+    text: P4 Ignore Configuration
+dialog.title.perforce:
+    text: Perforce
+dialog.title.perforce.login:
+    text: Perforce Login
+dialog.title.select.client:
+    text: Select Client
+dialog.title.select.user:
+    text: Select User
+dialog.title.show.all.revisions.in.changelist:
+    text: Revisions Submitted in Changelist {0}
+error.can.not.execute.invalid.connection.settings:
+    text: Cannot execute ''{0}''. Invalid connection settings.
+error.can.not.find.connection.for:
+    text: Cannot find connection for {0}
+error.can.not.find.moved.deleted.file:
+    text: 'Move/rename error; cannot find moved/deleted file for moved/added: {0}'
+error.can.not.get.p4.connection:
+    text: 'Cannot get p4 connection for root: {0}'
+error.can.not.parse.annotation.output:
+    text: Cannot parse annotation output
+error.can.t.load.content.perforce.is.offline:
+    text: 'Can''t load content: Perforce is offline'
+error.cannot.find.perforce.revision:
+    text: Cannot find Perforce revision {0} for {1}
+error.cannot.find.perforce.root:
+    text: Cannot find Perforce root for {0}
+error.cannot.parse.change.line:
+    text: 'Cannot parse change line: {0}'
+error.cannot.parse.p4.resolved.output:
+    text: Cannot parse 'p4 resolved' output
+error.cannot.revert.file.original.content.is.not.available.offline:
+    text: 'Cannot revert file {0}: original content is not available offline'
+error.client.unknown:
+    text: Client unknown
+error.client.unknown.env:
+    text: Client unknown. P4CLIENT is not defined
+error.during:
+    text: 'Error during {0}: {1}'
+error.failed.to.retrieve.perforce.client.settings:
+    text: 'Failed to retrieve Perforce client settings. Available information: port={0} user name={1} client name={2}'
+error.file.has.been.deleted:
+    text: 'File has been deleted: {0}'
+error.info.is.not.available:
+    text: Info is not available
+error.invalid.file.fstat.mapping:
+    text: Invalid file<->fstat mapping; fstat={0}; map={1}
+error.invalid.perforce.settings:
+    text: Invalid Perforce settings
+error.invalid.perforce.settings.for.0:
+    text: Invalid Perforce settings for {0}
+error.message.file.not.under.any.clientspec:
+    text: 'File not under any clientspec: {0}'
+error.missing.perforce.server.port:
+    text: Missing Perforce server/port
+error.missing.perforce.user.name:
+    text: Missing Perforce user name
+error.missing.perforce.workspace:
+    text: Missing Perforce workspace
+error.no.client.name.in.info.specification.found:
+    text: No client name in info specification found
+error.no.client.specifications.loaded:
+    text: No client specifications loaded
+error.no.connection.for.file:
+    text: 'No connection for file: {0}'
+error.no.fstat.for.file:
+    text: No fstat for file {0} in map {1}
+error.p4.returned.error.code:
+    text: p4 returned error code {0}
+error.p4.where.wrong.result:
+    text: 'p4 where wrong result: {0}'
+error.refreshing.incoming.changes:
+    text: 'Error refreshing incoming changes: rc={0}, stderr={1}'
+error.server.unknown.env:
+    text: Server unknown. P4PORT is not defined
+error.unexpected.p4.have.output.format:
+    text: 'Unexpected ''''p4 have'''' output format: {0}'
+error.unexpected.p4.opened.output.format:
+    text: 'Unexpected ''''p4 opened'''' output format: {0}'
+error.user.unknown.env:
+    text: User unknown. P4USER is not defined
+exception.text.cannot.add.file.not.under.any.spec:
+    text: 'Cannot add file not under any spec: {0}'
+exception.text.cannot.assure.no.file.being.on.server:
+    text: 'File already exists on server: {0}. Please undo and submit your changes first'
+exception.text.cannot.delete.local.file:
+    text: 'Cannot delete local file: {0}'
+exception.text.cannot.figure.out.local.path:
+    text: Cannot figure out local path
+exception.text.cannot.move.original.deleted:
+    text: Cannot move - original file was deleted, try first to sync manually in P4V
+exception.text.cannot.parse.fstat.stdout:
+    text: Cannot parse the p4 fstat stdout
+exception.text.cannot.rename:
+    text: Cannot rename, see the P4 stat of the files
+exception.text.file..should.not.be.readonly.cannot.edit:
+    text: 'File status in Perforce suggests it should not be readonly: {0}(To make it read/write just click the lock icon in the status bar)'
+exception.text.file.deleted.from.server.cannot.edit:
+    text: 'File deleted from server: {0} (To make it read/write just click the lock icon in the status bar)'
+exception.text.nothing.found.to.submit:
+    text: Nothing found to submit
+exception.text.perforce.integration.disconnected:
+    text: Perforce integration disconnected
+exception.text.perforce.integration.is.disabled:
+    text: Perforce integration is disabled
+exception.text.unexpected.fstat.line.syntax:
+    text: 'Unexpected fstat line syntax: "{0}"'
+exception.text.unknown.action:
+    text: 'Unknown action: {0}'
+failed.to.retrieve.p4.status.information:
+    text: 'Failed to retrieve P4 status information for {0}: {1}'
+file.caching.contents:
+    text: 'Perforce: caching old file contents'
+file.history.action.column.name:
+    text: Action
+file.history.client.column.name:
+    text: Client
+file.history.revision.column.name:
+    text: Revision
+file.ignored:
+    text: ignored
+file.ignored.cannot.be.added:
+    text: '- ignored file can''t be added.'
+file.removing.files:
+    text: Removing Files
+file.revision:
+    text: Revision
+file.wildcards.restricted:
+    text: 'File names may not contain wildcards [@#%*]: {0}'
+group.PerforceDirect.Menu.text:
+    text: _Perforce
+hotfix.cannot.clobber.files:
+    text: Can't clobber writable file(s)
+hotfix.op.canceled:
+    text: Operation canceled
+hotfix.open.for.edit:
+    text: open for edit keeping local changes
+hotfix.skipped.not.checked:
+    text: Skipped; not checked in locally
+hotfix.skipped.status.unknown:
+    text: Skipped; should be known to Perforce both on server and locally
+ignore.path.to.file:
+    text: 'Path to ignore file:'
+ignore.settings:
+    text: 'Use ignore settings:'
+integrate.choose.changelist.title:
+    text: Choose Changelist to Integrate
+integrate.configurable.cannot.load.branches.error.message:
+    text: 'Cannot load branches: {0}'
+integrate.configurable.load.branches.dialog.title:
+    text: Load Branches
+integrate.group.name.branched:
+    text: Branched
+integrate.group.name.cant.integrate:
+    text: Can't integrate(already opened)
+integrate.group.name.integrated:
+    text: Integrated
+job:
+    text: Job
+job.add:
+    text: Add Perforce Job
+job.adding:
+    text: Adding the job
+job.adding.to.changelist:
+    text: adding job to changelist
+job.adding.to.changelist.progress:
+    text: Adding job to changelist
+job.date:
+    text: Date
+job.description:
+    text: Description
+job.edit.associated:
+    text: Edit associated jobs
+job.edit.associated.title:
+    text: Edit Associated Jobs
+job.edit.linked:
+    text: Edit Jobs Linked to Changelist {0}
+job.find.matching.pattern:
+    text: Find and link job that matches pattern
+job.find.matching.pattern.title:
+    text: Find and Link Job That Matches Pattern
+job.getting.related:
+    text: getting related jobs
+job.getting.specs:
+    text: Getting jobs specifications
+job.jobs:
+    text: 'Jobs:'
+job.jobs.error:
+    text: Perforce Jobs Error
+job.link.to.changelist:
+    text: Link Job to Changelist
+job.loading.details:
+    text: loading job details
+job.loading.fields:
+    text: Loading job fields…
+job.loading.jobs.for.changelist:
+    text: Loading Perforce jobs for changelist
+job.no.matching.pattern:
+    text: There are no jobs matching pattern
+job.removing.from.changelist:
+    text: removing job from changelist
+job.removing.from.changelist.progress:
+    text: Removing job from changelist
+job.search.date.after:
+    text: 'Date After:'
+job.search.date.before:
+    text: 'Date Before:'
+job.search.date.format:
+    text: '''yyyy/mm/dd'' or ''yyyy/mm/dd:hh:mm:ss'''
+job.search.description:
+    text: 'Description pattern:'
+job.search.in.view:
+    text: Search in job view
+job.search.in.view.title:
+    text: Search in Job View
+job.search.name.pattern:
+    text: 'Job name pattern:'
+job.search.status:
+    text: 'Status:'
+job.search.user.pattern:
+    text: 'User name pattern:'
+job.searching.for.jobs:
+    text: 'searching for jobs. Search request: ''p4 jobs'
+job.searching.jobs:
+    text: Searching for jobs
+job.searching.jobs.to.add:
+    text: searching for jobs to add
+job.several.matching.pattern:
+    text: There are several jobs matching pattern
+job.status:
+    text: Status
+job.unlink.selected:
+    text: Unlink selected job
+job.unlink.selected.title:
+    text: Unlink Selected Job
+job.user:
+    text: User
+job.view.query:
+    text: 'Job View query:'
+label.browse.changes.filter.client:
+    text: '&Client:'
+label.browse.changes.filter.user:
+    text: '&User:'
+label.configure.perforce.client:
+    text: '&Workspace (Client):'
+label.configure.perforce.forcefully.sync.changelists:
+    text: Always sync local changelists with Perforce
+label.configure.perforce.path.to.p4.exe:
+    text: 'Path to P4 executable:'
+label.configure.perforce.path.to.p4vc.exe:
+    text: 'Path to P4VC executable:'
+label.configure.perforce.port:
+    text: '&Server (Port):'
+label.configure.perforce.use.p4.for.ignore:
+    text: Find ignored files using P4 executable
+label.configure.perforce.user:
+    text: '&User:'
+login:
+    text: Perforce login
+login.auth.problem:
+    text: Authentication Problem
+login.checking.auth.state:
+    text: Checking Perforce authentication state
+login.determining.credentials:
+    text: Determining Perforce credentials
+login.empty.password.restricted:
+    text: Empty password is not allowed
+login.error.notification:
+    text: Cannot log in to Perforce at {0}
+login.fix:
+    text: Click to fix
+login.getting.credentials:
+    text: Getting credentials
+login.inspect:
+    text: Inspect connection state
+login.monitor.failure:
+    text: Perforce login monitor failure
+login.monitor.failure.msg:
+    text: |-
+        Perforce cannot find where tickets file is.
+        Authentication state would be refreshed only during Perforce operations.
+login.not.logged.in:
+    text: Not logged in
+login.not.logged.in.title:
+    text: Not logged to Perforce
+login.not.logged.into.p4:
+    text: Not logged into Perforce
+login.password.expired:
+    text: Password has expired at {0}
+login.password.expired.title:
+    text: Perforce password expired
+login.password.invalid.or.unset:
+    text: Perforce password is invalid or unset. Do you want to enable 'Login' option?
+login.password.new.password:
+    text: 'New password:'
+login.password.old.password:
+    text: 'Old password:'
+login.password.password.not.changed.error:
+    text: New password should differ from the current
+login.password.passwords.not.match.error:
+    text: Passwords do not match
+login.password.remember:
+    text: Remember
+login.password.remember.tooltip:
+    text: The password will be stored between application sessions
+login.password.repeat.new.password:
+    text: 'Repeat new password:'
+login.password.update.title:
+    text: Perforce Update Password
+login.perforce.error:
+    text: 'Perforce error: {0}'
+login.refresh.auth.state:
+    text: 'Perforce: refresh authentication state'
+login.successful:
+    text: Successfully logged into Perforce
+message.revert.unchanged.files:
+    text: Revert unchanged files
+message.searching.for.files.to.resolve:
+    text: Searching for files to resolve
+message.server.cant.resolve.conflicts:
+    text: Perforce server does not support conflicts resolving.
+message.text.cannot.create.new.changelist:
+    text: 'Cannot create new changelist: {0}'
+message.text.cannot.find.client:
+    text: Cannot find any client
+message.text.cannot.find.merge.info.for.file:
+    text: Cannot find merge info for file {0}
+message.text.cannot.find.user:
+    text: Cannot find any user
+message.text.cannot.load.changes:
+    text: 'Cannot load changes: {0}'
+message.text.cannot.load.clients:
+    text: 'Cannot load clients: {0}'
+message.text.cannot.load.users:
+    text: 'Cannot load users: {0}'
+message.text.cannot.show.revisions:
+    text: 'Cannot show revisions: {0}'
+message.text.file.already.being.checked.out.or.added:
+    text: 'File already being checked out or added: {0}'
+message.text.file.deleted.from.server:
+    text: 'File deleted from server: {0} (You can still add it)'
+message.text.file.not.on.server:
+    text: 'File not on server: {0}'
+message.text.filename.non.acceptable:
+    text: 'Filename doesn''''t conform to Perforce requirements: {0}'
+message.text.no.files.to.resolve:
+    text: No file(s) to resolve
+message.text.perforce.command.failed.enter.password.v2:
+    text: 'Perforce Password:'
+message.text.perforce.command.failed.withdir.enter.password.v2:
+    text: 'Perforce Password (root directory {0}):'
+message.title.cannot.edit:
+    text: 'P4: Cannot edit'
+message.title.create.new.changelist:
+    text: Create New Changelist
+message.title.no.reason.to.edit:
+    text: 'P4: No reason to edit'
+message.title.refresh.changes:
+    text: Perforce Settings
+message.title.resolve:
+    text: Resolve
+message.title.revert.unchanged:
+    text: Revert Unchanged
+message.title.revert.unchanged.files:
+    text: Revert Unchanged Files
+no.branch.spec.selected.label.text:
+    text: No branch spec selected
+none.charset.presentation:
+    text: none
+nothing.found:
+    text: Nothing found
+notification.group.perforce:
+    text: Perforce
+operation.name.revert:
+    text: '&Revert'
+operation.name.submit:
+    text: Subm_it
+p4vc:
+    text: P4VC
+p4vc.run.failed:
+    text: |-
+        Failed to run p4vc: {0}
+        Please make sure that the Perforce Visual Client is installed and available in the path.
+p4vc.running.problems:
+    text: Problems running p4vc
+p4vc.running.problems.message:
+    text: |-
+        Commands: {0}
+        Exit code: {1}
+        {2}
+p4vc.running.problems.output:
+    text: 'Output: {0}'
+perforce:
+    text: Perforce
+perforce.authentication.problem:
+    text: Perforce authentication problem
+perforce.error:
+    text: Perforce error
+perforce.is.offline:
+    text: Perforce is offline
+perforce.jobs.search.limit.exceeded.warning:
+    text: Found more then {0} jobs. Only first {0} jobs are shown.
+perforce.jobs.select.one:
+    text: Select Perforce Job
+perforce.name.with.mnemonic:
+    text: _Perforce
+perforce.use.perforce.jobs:
+    text: Enable Perforce Jobs support
+progress.marking.file.as.resolved:
+    text: Marking file as resolved
+progress.text.perforce.command:
+    text: Perforce
+progress.text2.p4.status:
+    text: p4 {0}
+progress.title.checking.for.ignored.files:
+    text: Checking for ignored files
+progress.title.perforce.edit:
+    text: Perforce Edit
+progress.title.revert:
+    text: Revert
+progress.title.running.perforce.commands:
+    text: Running Perforce Commands
+project.updating:
+    text: Updating project
+radio.no.p4config.env:
+    text: '{0} environment value(s) are not set'
+radio.no.p4ignore.env:
+    text: P4IGNORE environment variable is not set
+refresh.force.description:
+    text: Force Refresh (re-query all files states)
+replaying.offline.operations:
+    text: Replaying Offline Operations
+request.text.enter.change.description:
+    text: 'Enter change description:'
+request.title.create.new.change.list:
+    text: Create New Changelist
+search:
+    text: Search
+search.results:
+    text: 'Search results:'
+server.timeout:
+    text: Server timeout
+settings.p4.option.group:
+    text: Perforce
+settings.perforce.option.group:
+    text: Perforce
+settings.port.placeholder:
+    text: <perforce_server>:1666
+shelf.browse.mnemonic:
+    text: '&Browse Shelf…'
+shelf.changes:
+    text: Perforce Shelved Changes
+shelf.changes.node.title:
+    text: Shelved Changes
+shelf.unshelve:
+    text: Unshelve
+shelf.unshelve.action.description:
+    text: Unshelve selected changes to the default changelist
+shelf.unshelve.and.delete:
+    text: Unshelve and Delete
+shelf.unshelve.and.delete.action.description:
+    text: Unshelve selected changes to the default changelist and delete them from the shelf
+shelve:
+    text: Shelve
+show.all.files.from.change.list.searching.for.changed.files.progress.title:
+    text: Searching for Changed Files
+show.all.files.from.change.list.too.many.files.affected.error.message:
+    text: 'Cannot show changed files: too many files affected by the change'
+specify.search.params:
+    text: 'Specify search parameters:'
+sync.error:
+    text: Perforce Sync Error
+sync.to.revision:
+    text: Sync to This Revision
+timeout.error:
+    text: Timeout waiting for Perforce server
+unknown.status:
+    text: unknown status

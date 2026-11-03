@@ -1,0 +1,199 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the MIT license (see NOTICE.txt).
+package org.jetbrains.idea.perforce.application;
+
+import consulo.application.util.SystemInfo;
+import consulo.logging.Logger;
+import consulo.perforce.localize.PerforceLocalize;
+import consulo.util.collection.ContainerUtil;
+import consulo.util.collection.MultiMap;
+import consulo.util.io.FileUtil;
+import consulo.util.io.OSAgnosticPathUtil;
+import consulo.versionControlSystem.VcsException;
+import consulo.virtualFileSystem.VirtualFile;
+import org.jetbrains.idea.perforce.perforce.PerforceAuthenticationException;
+import org.jetbrains.idea.perforce.perforce.PerforceServerUnavailable;
+import org.jetbrains.idea.perforce.perforce.connections.P4Connection;
+import org.jspecify.annotations.Nullable;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+public class PerforceClientRootsChecker implements P4RootsInformation {
+  private static final Logger LOG = Logger.getInstance(PerforceClientRootsChecker.class);
+  private final Map<P4Connection, WrongRoots> myMap = new HashMap<>();
+  private final MultiMap<P4Connection, VcsException> myErrors = new MultiMap<>();
+  private final Map<P4Connection, PerforceAuthenticationException> myNotAuthorized = new HashMap<>();
+  private boolean myHasNoConnections = false;
+
+  public PerforceClientRootsChecker() {}
+
+  public PerforceClientRootsChecker(Map<P4Connection, ConnectionInfo> infoAndClient,
+                                    Map<VirtualFile, P4Connection> map) {
+    this(infoAndClient, map, null);
+  }
+
+  /**
+   * @param clientRoot if specified, additionally check that this root is under client spec roots.
+   *                   Used when testing connection from clone dialog where project roots may not be set yet.
+   */
+  public PerforceClientRootsChecker(Map<P4Connection, ConnectionInfo> infoAndClient,
+                                    Map<VirtualFile, P4Connection> map,
+                                    @Nullable VirtualFile clientRoot) {
+    if (map.containsKey(null)) {
+      LOG.info("Null root: " + new LinkedHashMap<>(map));
+    }
+
+    myHasNoConnections = map.isEmpty();
+    MultiMap<P4Connection, VirtualFile> inverse = invertConnectionMap(map);
+    Set<P4Connection> connectionsToCheck = new LinkedHashSet<>(inverse.keySet());
+
+    for (P4Connection connection : connectionsToCheck) {
+      List<String> clientRoots;
+      try {
+        clientRoots = getClientRoots(connection, infoAndClient);
+      } catch (PerforceAuthenticationException e) {
+        myNotAuthorized.put(connection, e);
+        continue;
+      } catch (VcsException e) {
+        myErrors.putValue(connection, e);
+        continue;
+      }
+
+      Collection<VirtualFile> rootsToCheck = new ArrayList<>(inverse.get(connection));
+      if (clientRoot != null && !rootsToCheck.contains(clientRoot)) {
+        rootsToCheck.add(clientRoot);
+      }
+
+      WrongRoots wrongRoots = checkRoots(rootsToCheck, clientRoots);
+      if (wrongRoots != null) {
+        myMap.put(connection, wrongRoots);
+      }
+    }
+  }
+
+  private static @Nullable WrongRoots checkRoots(Collection<VirtualFile> roots, List<String> clientRoots) {
+    WrongRoots wrongRoots = null;
+
+    for (VirtualFile root : roots) {
+      if (root == null) {
+        continue; // logged already at the recalculate method start
+      }
+      boolean checkedOk = false;
+      // Client roots are already case-corrected and junction-mapped by ClientRootsCache.putGet,
+      // so they are in the same path space as VirtualFile paths — no canonical resolution needed.
+      File ioFile = new File(root.getPath());
+
+      for (String clientRoot : clientRoots) {
+        if ("null".equals(clientRoot)) {
+          checkedOk = true;
+          break;
+        }
+
+        File ioRoot = new File(clientRoot);
+        if (isDirectory(ioRoot) && FileUtil.isAncestor(ioRoot, ioFile, false)) {
+          checkedOk = true;
+          break;
+        }
+      }
+      if (!checkedOk) {
+        if (wrongRoots == null) {
+          wrongRoots = new WrongRoots(clientRoots);
+        }
+        wrongRoots.addWrong(root);
+      }
+    }
+    return wrongRoots;
+  }
+
+  private static MultiMap<P4Connection, VirtualFile> invertConnectionMap(Map<VirtualFile, P4Connection> map) {
+    MultiMap<P4Connection, VirtualFile> inverse = new MultiMap<>();
+    for (Map.Entry<VirtualFile, P4Connection> entry : map.entrySet()) {
+      inverse.putValue(entry.getValue(), entry.getKey());
+    }
+    return inverse;
+  }
+
+  public boolean isServerUnavailable() {
+    return ContainerUtil.findInstance(new ArrayList<>(myErrors.values()), PerforceServerUnavailable.class) != null;
+  }
+
+  public static boolean isDirectory(File file) {
+    if (file.isDirectory()) {
+      return true;
+    }
+    if (SystemInfo.isWindows) {
+      String path = file.getPath();
+      if (path.length() == 2 && OSAgnosticPathUtil.startsWithWindowsDrive(path)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static List<String> getClientRoots(P4Connection connection, Map<P4Connection, ConnectionInfo> infoMap) throws VcsException {
+    ConnectionInfo info = infoMap.get(connection);
+    ClientData clientSpec = info == null ? null : info.getClient();
+    if (clientSpec == null) {
+      throw new VcsException(PerforceLocalize.errorNoClientSpecificationsLoaded());
+    }
+    return clientSpec.getAllRoots();
+  }
+
+  @Override
+  public MultiMap<P4Connection, VcsException> getErrors() {
+    return myErrors;
+  }
+
+  @Override
+  public boolean hasAnyErrors() {
+    return ! myMap.isEmpty() || ! myErrors.isEmpty();
+  }
+
+  @Override
+  public boolean hasNotAuthorized() {
+    return ! myNotAuthorized.isEmpty();
+  }
+
+  @Override
+  public Map<P4Connection, PerforceAuthenticationException> getNotAuthorized() {
+    return myNotAuthorized;
+  }
+
+  @Override
+  public Map<P4Connection, WrongRoots> getMap() {
+    return myMap;
+  }
+
+  @Override
+  public boolean hasNoConnections() { return myHasNoConnections; }
+
+  // needed only for reporting
+  public static class WrongRoots {
+    private final List<String> myActualInClientSpec;
+    private final List<VirtualFile> myWrong;
+
+    public WrongRoots(List<String> actualInClientSpec) {
+      myActualInClientSpec = actualInClientSpec;
+      myWrong = new ArrayList<>();
+    }
+
+    public void addWrong(VirtualFile file) {
+      myWrong.add(file);
+    }
+
+    public List<String> getActualInClientSpec() {
+      return myActualInClientSpec;
+    }
+
+    public List<VirtualFile> getWrong() {
+      return myWrong;
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "consulo:run-desktop-awt-fork",
+  "type": "MavenRunConfiguration",
+  "factoryName": "Maven",
+  "options": {
+    "goals": [
+      "consulo:run-desktop-awt-fork",
+      "-pl",
+      ":consulo.perforce"
+    ],
+    "workingDirectory": "$PROJECT_DIR$"
+  },
+  "beforeRun": [
+    {
+      "id": "Maven.BeforeRunTask",
+      "state": {
+        "enabled": true,
+        "projectPath": "$PROJECT_DIR$/pom.xml",
+        "goal": "package -T 1C"
+      }
+    }
+  ]
+}
