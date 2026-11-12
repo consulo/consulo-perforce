@@ -17,8 +17,10 @@ package org.jetbrains.idea.perforce.application;
 
 import consulo.annotation.component.ExtensionImpl;
 import consulo.localize.LocalizeValue;
+import consulo.perforce.icon.PerforceIconGroup;
 import consulo.perforce.localize.PerforceLocalize;
 import consulo.project.Project;
+import consulo.ui.image.Image;
 import consulo.versionControlSystem.AbstractVcs;
 import consulo.versionControlSystem.VcsFactory;
 import jakarta.inject.Inject;
@@ -43,6 +45,11 @@ public class PerforceVcsFactory implements VcsFactory {
     @Override
     public LocalizeValue getDisplayName() {
         return PerforceLocalize.perforce();
+    }
+
+    @Override
+    public Image getIcon() {
+        return PerforceIconGroup.perforcep4();
     }
 
     @Override

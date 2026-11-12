@@ -23,6 +23,7 @@ import consulo.versionControlSystem.VcsException;
 import consulo.versionControlSystem.change.Change;
 import consulo.versionControlSystem.change.ChangeListManager;
 import consulo.versionControlSystem.change.ContentRevision;
+import consulo.versionControlSystem.change.VcsDirtyScopeManager;
 import consulo.versionControlSystem.change.LocalChangeList;
 import consulo.virtualFileSystem.VirtualFile;
 import consulo.util.collection.ArrayUtil;
@@ -399,8 +400,102 @@ public final class PerforceSettings implements PersistentStateComponent<Perforce
         XmlSerializerUtil.copyBean(object, this);
     }
 
+    // accessors of the settings page - transient, the fields are what is stored
+
+    @Transient
+    public boolean isEnabled() {
+        return ENABLED;
+    }
+
+    /**
+     * Goes online or offline - nothing happens when it already is.
+     */
+    public void setEnabled(boolean enabled) {
+        if (enabled == ENABLED) {
+            return;
+        }
+        if (enabled) {
+            enable();
+        }
+        else {
+            disable(true);
+            VcsDirtyScopeManager.getInstance(project()).markEverythingDirty();
+        }
+    }
+
+    @Transient
+    public boolean isCanGoOffline() {
+        return myCanGoOffline;
+    }
+
     public void setCanGoOffline(boolean canGoOffline) {
         myCanGoOffline = canGoOffline;
+    }
+
+    @Transient
+    public boolean isShowCmds() {
+        return showCmds;
+    }
+
+    public void setShowCmds(boolean value) {
+        showCmds = value;
+    }
+
+    @Transient
+    public boolean isUseLogin() {
+        return USE_LOGIN;
+    }
+
+    public void setUseLogin(boolean value) {
+        USE_LOGIN = value;
+    }
+
+    @Transient
+    public boolean isShowBranchesHistory() {
+        return SHOW_BRANCHES_HISTORY;
+    }
+
+    public void setShowBranchesHistory(boolean value) {
+        SHOW_BRANCHES_HISTORY = value;
+    }
+
+    @Transient
+    public boolean isShowIntegratedInCommittedChanges() {
+        return SHOW_INTEGRATED_IN_COMMITTED_CHANGES;
+    }
+
+    public void setShowIntegratedInCommittedChanges(boolean value) {
+        SHOW_INTEGRATED_IN_COMMITTED_CHANGES = value;
+    }
+
+    @Transient
+    public boolean isUsePerforceJobs() {
+        return USE_PERFORCE_JOBS;
+    }
+
+    public void setUsePerforceJobs(boolean value) {
+        USE_PERFORCE_JOBS = value;
+    }
+
+    /**
+     * Whether p4 itself tells the ignored files, rather than the patterns matched here.
+     */
+    @Transient
+    public boolean isUseP4ForIgnore() {
+        return !USE_PATTERN_MATCHING_IGNORE;
+    }
+
+    public void setUseP4ForIgnore(boolean value) {
+        USE_PATTERN_MATCHING_IGNORE = !value;
+    }
+
+    @Transient
+    public boolean isForceSyncChangelists() {
+        return FORCE_SYNC_CHANGELISTS;
+    }
+
+    public void setForceSyncChangelists(boolean value) {
+        FORCE_SYNC_CHANGELISTS = value;
     }
 
     @Override

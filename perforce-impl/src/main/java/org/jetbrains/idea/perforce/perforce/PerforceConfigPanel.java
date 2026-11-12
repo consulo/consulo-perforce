@@ -80,8 +80,8 @@ final class PerforceConfigPanel {
     private final TextBox myUser = TextBox.create();
     private final ComboBox<String> myCharset = ComboBox.create(CHARSET_VALUES);
 
-    private final CheckBox myShowCmds = CheckBox.create(PerforceLocalize.checkboxConfigurePerforceLogCommands());
-    private final CheckBox myUseLogin = CheckBox.create(PerforceLocalize.checkboxConfigurePerforceUseLoginAuthentication());
+    private final CheckBox myShowCmds;
+    private final CheckBox myUseLogin;
 
     private final IntBox myServerTimeoutField = IntBox.create();
 
@@ -101,9 +101,11 @@ final class PerforceConfigPanel {
     private volatile boolean myDisposed;
 
     @RequiredUIAccess
-    PerforceConfigPanel(Project project, Disposable disposable) {
+    PerforceConfigPanel(Project project, Disposable disposable, CheckBox showCmds, CheckBox useLogin) {
         myProject = project;
         myDisposable = disposable;
+        myShowCmds = showCmds;
+        myUseLogin = useLogin;
         myP4EnvHelper = P4EnvHelper.getConfigHelper(project);
         mySettings = PerforceSettings.getSettings(project);
 
@@ -139,47 +141,36 @@ final class PerforceConfigPanel {
         Disposer.register(disposable, () -> myDisposed = true);
     }
 
+    /**
+     * The connection and the ignore settings - none for the default project.
+     */
     @RequiredUIAccess
-    Component createPanel(PropertyBuilder builder) {
-        VerticalLayout root = VerticalLayout.create();
-
-        if (!myProject.isDefault()) {
-            CheckBox enabled = CheckBox.create(PerforceLocalize.checkboxConfigurePerforceIsEnabled());
-            builder.add(enabled, () -> mySettings.ENABLED, it -> {
-                if (it) {
-                    mySettings.enable();
-                }
-                else {
-                    mySettings.disable(true);
-                }
-            });
-            root.add(enabled);
+    void addConnectionSettings(VerticalLayout root, PropertyBuilder builder) {
+        if (myProject.isDefault()) {
+            return;
         }
+        root.add(createConfigPanel(builder));
+        root.add(createIgnorePanel(builder));
 
-        CheckBox canGoOffline = CheckBox.create(PerforceLocalize.checkboxSwitchOffline());
-        builder.add(canGoOffline, () -> mySettings.myCanGoOffline, it -> mySettings.myCanGoOffline = it);
-        root.add(canGoOffline);
+        myProject.getMessageBus().connect(myDisposable).subscribe(P4EnvHelper.P4_ENV_CHANGED,
+            () -> UIAccess.get().give(this::updateIgnorePanelEnabled));
+    }
 
-        if (!myProject.isDefault()) {
-            root.add(createConfigPanel(builder));
-            root.add(createIgnorePanel(builder));
-
-            myProject.getMessageBus().connect(myDisposable).subscribe(P4EnvHelper.P4_ENV_CHANGED,
-                () -> UIAccess.get().give(this::updateIgnorePanelEnabled));
-        }
-
-        builder.add(myShowCmds, () -> mySettings.showCmds, it -> mySettings.showCmds = it);
-        root.add(myShowCmds);
-        root.add(createDumpFileRow());
-
-        builder.add(myUseLogin, () -> mySettings.USE_LOGIN, it -> mySettings.USE_LOGIN = it);
+    /**
+     * The use login check box, with the test of the connection.
+     */
+    @RequiredUIAccess
+    Component createLoginRow() {
         DockLayout loginRow = DockLayout.create();
         loginRow.left(myUseLogin);
         if (!myProject.isDefault()) {
             loginRow.right(Button.create(PerforceLocalize.buttonTextTestConnection(), event -> testConnection()));
         }
-        root.add(loginRow);
+        return loginRow;
+    }
 
+    @RequiredUIAccess
+    void addExecutables(VerticalLayout root, PropertyBuilder builder) {
         builder.add(() -> myPathToP4.getValue(), myPathToP4::setValue, () -> mySettings.pathToExec, it -> {
             String newText = StringUtil.notNullize(it).trim();
             boolean execChanged = !mySettings.pathToExec.equals(newText);
@@ -193,41 +184,21 @@ final class PerforceConfigPanel {
         builder.add(() -> myPathToP4V.getValue(), myPathToP4V::setValue, () -> mySettings.PATH_TO_P4VC,
             it -> mySettings.PATH_TO_P4VC = StringUtil.notNullize(it).trim());
         root.add(LabeledBuilder.filled(PerforceLocalize.labelConfigurePerforcePathToP4vcExe(), myPathToP4V));
+    }
 
-        CheckBox showBranches = CheckBox.create(PerforceLocalize.checkboxConfigurePerforceShowBranchingHistory());
-        builder.add(showBranches, () -> mySettings.SHOW_BRANCHES_HISTORY, it -> mySettings.SHOW_BRANCHES_HISTORY = it);
-        root.add(showBranches);
-
-        CheckBox showIntegrated = CheckBox.create(PerforceLocalize.checkboxConfigurePerforceShowIntegratedChangelists());
-        builder.add(showIntegrated, () -> mySettings.SHOW_INTEGRATED_IN_COMMITTED_CHANGES,
-            it -> mySettings.SHOW_INTEGRATED_IN_COMMITTED_CHANGES = it);
-        root.add(showIntegrated);
-
+    @RequiredUIAccess
+    Component createServerTimeoutRow(PropertyBuilder builder) {
         builder.add(myServerTimeoutField, () -> mySettings.SERVER_TIMEOUT / 1000,
             it -> mySettings.SERVER_TIMEOUT = (it == null ? 0 : it) * 1000);
         HorizontalLayout timeoutRow = HorizontalLayout.create();
         timeoutRow.add(Label.create(PerforceLocalize.serverTimeout()));
         timeoutRow.add(myServerTimeoutField);
         timeoutRow.add(Label.create(PerforceLocalize.configurePerforceTimeoutSeconds()));
-        root.add(timeoutRow);
-
-        CheckBox useJobs = CheckBox.create(PerforceLocalize.perforceUsePerforceJobs());
-        builder.add(useJobs, () -> mySettings.USE_PERFORCE_JOBS, it -> mySettings.USE_PERFORCE_JOBS = it);
-        root.add(useJobs);
-
-        CheckBox useP4ForIgnore = CheckBox.create(PerforceLocalize.labelConfigurePerforceUseP4ForIgnore());
-        builder.add(useP4ForIgnore, () -> !mySettings.USE_PATTERN_MATCHING_IGNORE, it -> mySettings.USE_PATTERN_MATCHING_IGNORE = !it);
-        root.add(useP4ForIgnore);
-
-        CheckBox forceSync = CheckBox.create(PerforceLocalize.labelConfigurePerforceForcefullySyncChangelists());
-        builder.add(forceSync, () -> mySettings.FORCE_SYNC_CHANGELISTS, it -> mySettings.FORCE_SYNC_CHANGELISTS = it);
-        root.add(forceSync);
-
-        return root;
+        return timeoutRow;
     }
 
     @RequiredUIAccess
-    private Component createDumpFileRow() {
+    Component createDumpFileRow() {
         HorizontalLayout row = HorizontalLayout.create();
         row.paddingBuilder().leftSet(Space.LARGE).apply();
         row.add(Label.create(PerforceLocalize.checkboxConfigurePerforceLogCommandsOutput()));
