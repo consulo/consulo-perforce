@@ -15,7 +15,6 @@ import consulo.versionControlSystem.util.VcsRootIterator;
 import consulo.versionControlSystem.util.VcsUtil;
 import consulo.virtualFileSystem.LocalFileSystem;
 import consulo.virtualFileSystem.VirtualFile;
-import consulo.virtualFileSystem.util.VirtualFileUtil;
 import org.jetbrains.idea.perforce.perforce.P4HaveParser;
 import org.jetbrains.idea.perforce.perforce.PathsHelper;
 import org.jetbrains.idea.perforce.perforce.PerforceRunner;
@@ -23,6 +22,7 @@ import org.jetbrains.idea.perforce.perforce.connections.P4Connection;
 import org.jspecify.annotations.Nullable;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -146,7 +146,10 @@ public abstract class UnversionedScopeScanner {
     for (FilePath root : roots) {
       VirtualFile vRoot = root.getVirtualFile();
       if (vRoot == null) {
-        vRoot = VirtualFileUtil.findFileByIoFile(root.getIOFile(), false);
+        Path rootPath = root.getNioPath();
+        if (rootPath != null) {
+          vRoot = LocalFileSystem.getInstance().findFileByNioFile(rootPath);
+        }
       }
       if (vRoot == null || !vRoot.isValid()) {
         continue;

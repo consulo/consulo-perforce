@@ -138,7 +138,7 @@ public class PerforceCommittedChangesProvider implements CachingCommittedChanges
 
     @Override
     public RepositoryLocation getLocationFor(FilePath root) {
-        P4Connection connection = PerforceSettings.getSettings(myProject).getConnectionForFile(root.getIOFile());
+        P4Connection connection = PerforceSettings.getSettings(myProject).getConnectionForFile(root);
         assert connection != null : "Null connection for " + root;
         String serverAddress = PerforceManager.getInstance(myProject).getClient(connection).getDeclaredServerPort();
         String location = serverAddress + "://" + root.getPresentableUrl();
@@ -294,7 +294,7 @@ public class PerforceCommittedChangesProvider implements CachingCommittedChanges
     ) throws VcsException {
         for (Change change : changeList.getChanges()) {
             ContentRevision afterRevision = change.getAfterRevision();
-            if (afterRevision != null && FileUtil.filesEqual(filePath.getIOFile(), afterRevision.getFile().getIOFile())) {
+            if (afterRevision != null && FileUtil.pathsEqual(filePath.getPath(), afterRevision.getFile().getPath())) {
                 return Pair.create(changeList, filePath);
             }
         }

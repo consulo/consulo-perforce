@@ -43,6 +43,8 @@ import org.jetbrains.idea.perforce.perforce.connections.P4Connection;
 import org.jspecify.annotations.Nullable;
 
 import java.io.File;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -151,11 +153,11 @@ public class ShelveAction extends DumbAwareAction implements AnActionWithSyncUpd
             PerforceRunner runner = PerforceRunner.getInstance(project);
             MultiMap<P4Connection, FilePath> connections = getConnections(project, changes);
 
-            List<File> addedChanges = new ArrayList<>();
+            List<FilePath> addedChanges = new ArrayList<>();
             for (Change change : changes) {
                 ContentRevision afterRevision = change.getAfterRevision();
                 if (change.getBeforeRevision() == null && afterRevision != null) {
-                    addedChanges.add(afterRevision.getFile().getIOFile());
+                    addedChanges.add(afterRevision.getFile());
                 }
             }
 
@@ -186,8 +188,13 @@ public class ShelveAction extends DumbAwareAction implements AnActionWithSyncUpd
                     }
 
                     for (FilePath path : filePaths) {
-                        File file = path.getIOFile();
-                        if (addedChanges.contains(file)) {
+                        Path nioPath = path.getNioPath();
+                        // perforce works with files of this machine only
+                        if (nioPath == null || nioPath.getFileSystem() != FileSystems.getDefault()) {
+                            continue;
+                        }
+                        File file = nioPath.toFile();
+                        if (addedChanges.contains(path)) {
                             FileUtil.delete(file);
                             refreshForVcs.addDeletedFile(file);
                         }

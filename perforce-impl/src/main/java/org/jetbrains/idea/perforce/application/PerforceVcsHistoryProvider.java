@@ -127,7 +127,7 @@ public class PerforceVcsHistoryProvider implements VcsHistoryProvider {
     public VcsHistorySession createSessionFor(FilePath filePath) throws VcsException {
         FilePath committedPath = ChangesUtil.getCommittedPath(myVcs.getProject(), filePath);
 
-        P4Connection connection = myVcs.getSettings().getConnectionForFile(committedPath.getIOFile());
+        P4Connection connection = myVcs.getSettings().getConnectionForFile(committedPath);
         if (connection == null) {
             throw new VcsException(PerforceLocalize.errorInvalidPerforceSettings().get());
         }

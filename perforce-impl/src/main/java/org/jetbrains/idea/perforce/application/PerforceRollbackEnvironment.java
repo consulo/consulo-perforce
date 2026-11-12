@@ -93,7 +93,7 @@ public class PerforceRollbackEnvironment implements RollbackEnvironment {
                 for (Change c : reverted) {
                     FilePath afterPath = ChangesUtil.getAfterPath(c);
                     if (afterPath != null) {
-                        P4Connection connection = PerforceConnectionManager.getInstance(myProject).getConnectionForFile(afterPath.getIOFile());
+                        P4Connection connection = PerforceConnectionManager.getInstance(myProject).getConnectionForFile(afterPath);
                         if (connection != null) {
                             try {
                                 PerforceManager.ensureValidClient(myProject, connection);

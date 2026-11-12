@@ -34,6 +34,8 @@ import org.jetbrains.idea.perforce.perforce.connections.PerforceConnectionManage
 import org.jspecify.annotations.Nullable;
 
 import java.io.File;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -142,7 +144,11 @@ public class PerforceIntegrateEnvironment extends AbstractUpdateEnvironment {
     private static Collection<File> convertToFiles(Collection<FilePath> files) {
         List<File> result = new ArrayList<>();
         for (FilePath filePath : files) {
-            result.add(filePath.getIOFile());
+            Path path = filePath.getNioPath();
+            // perforce works with files of this machine only
+            if (path != null && path.getFileSystem() == FileSystems.getDefault()) {
+                result.add(path.toFile());
+            }
         }
         return result;
     }

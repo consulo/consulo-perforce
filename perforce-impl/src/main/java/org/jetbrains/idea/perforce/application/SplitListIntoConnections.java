@@ -30,7 +30,7 @@ public class SplitListIntoConnections<T> {
 
   private void processRevision(ContentRevision contentRevision) throws VcsException {
     FilePath filePath = contentRevision.getFile();
-    P4Connection connection = myConnectionManager.getConnectionForFile(filePath.getIOFile());
+    P4Connection connection = myConnectionManager.getConnectionForFile(filePath);
     if (connection == null) {
       return;
     }

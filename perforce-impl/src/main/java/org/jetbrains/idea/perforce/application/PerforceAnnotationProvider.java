@@ -109,7 +109,7 @@ public class PerforceAnnotationProvider implements AnnotationProviderEx {
     @Override
     public FileAnnotation annotate(FilePath path, VcsRevisionNumber number) throws VcsException {
         PerforceSettings settings = PerforceSettings.getSettings(myProject);
-        P4Connection connection = settings.getConnectionForFile(path.getIOFile());
+        P4Connection connection = settings.getConnectionForFile(path);
         if (connection == null) {
             throw new VcsException(PerforceLocalize.errorCannotFindPerforceRoot(path).get());
         }

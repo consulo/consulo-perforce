@@ -19,6 +19,7 @@ import consulo.application.progress.ProgressManager;
 import consulo.project.Project;
 import consulo.ui.ex.awt.Messages;
 import consulo.util.lang.StringUtil;
+import consulo.versionControlSystem.FilePath;
 import consulo.versionControlSystem.VcsException;
 import consulo.versionControlSystem.change.Change;
 import consulo.versionControlSystem.change.ChangeListManager;
@@ -362,6 +363,10 @@ public final class PerforceSettings implements PersistentStateComponent<Perforce
 
     public @Nullable P4Connection getConnectionForFile(VirtualFile file) {
         return PerforceConnectionManager.getInstance(getProject()).getConnectionForFile(file);
+    }
+
+    public @Nullable P4Connection getConnectionForFile(FilePath filePath) {
+        return PerforceConnectionManager.getInstance(getProject()).getConnectionForFile(filePath);
     }
 
     /**
