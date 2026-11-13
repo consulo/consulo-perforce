@@ -5,8 +5,8 @@ package org.jetbrains.idea.perforce.operations;
 import consulo.project.Project;
 import consulo.util.collection.ContainerUtil;
 import consulo.versionControlSystem.change.VcsDirtyScopeManager;
-import consulo.virtualFileSystem.LocalFileSystem;
 import consulo.virtualFileSystem.NewVirtualFile;
+import consulo.virtualFileSystem.RefreshQueue;
 import consulo.virtualFileSystem.StandardFileSystems;
 import consulo.virtualFileSystem.VirtualFile;
 import org.jspecify.annotations.Nullable;
@@ -35,8 +35,8 @@ public class RefreshForVcs {
     }
 
     public void run(Project project) {
-        LocalFileSystem.getInstance().refreshIoFiles(myFiles, false, false, null);
-        LocalFileSystem.getInstance().refreshIoFiles(myDirs, false, false, null);
+        RefreshQueue.getInstance().refreshPaths(false, false, null, ContainerUtil.map(myFiles, File::toPath));
+        RefreshQueue.getInstance().refreshPaths(false, false, null, ContainerUtil.map(myDirs, File::toPath));
 
         List<VirtualFile> vFiles = new ArrayList<>();
         for (File file : myFiles) {
